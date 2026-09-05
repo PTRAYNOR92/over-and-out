@@ -1,0 +1,13 @@
+# Tells Netlify how to publish this site.
+# There's no build step — the files are served exactly as they are.
+
+[build]
+  publish = "."
+
+# Sensible caching: always re-check the page, but let the browser hold on to
+# the CSS and JS for a while. (Netlify changes their addresses when they change,
+# so visitors never get a stale version.)
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
