@@ -86,7 +86,11 @@
   .bNote{font-size:12px;color:var(--dim);padding:10px 4px;line-height:1.45}
   #bMe{font:700 12px var(--label);letter-spacing:1px;color:var(--amber);margin:8px 4px 4px;min-height:1em}
   #bSession{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.5}
-  #bSession input{width:60%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0a1119;color:var(--ink);font:inherit}
+  #bSession input{width:100%;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:#0a1119;color:var(--ink);font:inherit;font-size:14px;margin-top:8px}
+  #bSession input#bNameIn{width:60%;margin-top:0}
+  .bOr{font:700 10px var(--label);letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-align:center;margin:10px 0 2px}
+  .bRow2{display:flex;gap:8px;margin-top:8px}
+  .bRow2 .ghost{padding:10px}
   #bClose{margin-top:10px}
   #lbBtn{display:none}
 </style>
@@ -1016,6 +1020,47 @@ function lbSignIn() {
     options: { redirectTo: location.origin + location.pathname }
   });
 }
+/* Email and password, for players without a Google account. Confirmation
+   emails are switched off in Supabase for now, so a new account is live the
+   moment it is created; password reset arrives with the email service. */
+async function lbEmailAuth(mode) {
+  const email = (E('bEmail').value || '').trim(), pw = E('bPw').value || '';
+  const msg = E('bAuthMsg');
+  if (!/^\S+@\S+\.\S+$/.test(email)) { msg.textContent = 'That email address does not look right.'; return; }
+  if (pw.length < 6) { msg.textContent = 'Password needs to be at least 6 characters.'; return; }
+  msg.textContent = mode === 'up' ? 'Creating your account…' : 'Signing in…';
+  try {
+    const res = mode === 'up'
+      ? await LB.client.auth.signUp({ email, password: pw })
+      : await LB.client.auth.signInWithPassword({ email, password: pw });
+    if (res.error) {
+      const t = String(res.error.message || '');
+      msg.textContent = /already|exists/i.test(t) ? 'There is already an account with that email — try Sign in.'
+                      : /invalid|credentials/i.test(t) ? 'Wrong email or password.'
+                      : t;
+      return;
+    }
+    if (mode === 'up' && res.data && !res.data.session) {
+      msg.textContent = 'Account created — check your email to confirm it, then sign in.';
+      return;
+    }
+    msg.textContent = '';
+  } catch (e) { msg.textContent = 'Could not reach the sign-in service. Try again in a moment.'; }
+}
+function lbSignInBlock() {
+  return '<button class="wide" id="bIn">Continue with Google</button>' +
+    '<div class="bOr">or with email</div>' +
+    '<input id="bEmail" type="email" autocomplete="email" placeholder="Email address">' +
+    '<input id="bPw" type="password" autocomplete="current-password" placeholder="Password (6+ characters)">' +
+    '<div class="bRow2"><button class="ghost" id="bEmailIn">Sign in</button><button class="ghost" id="bEmailUp">Create account</button></div>' +
+    '<div class="bNote" id="bAuthMsg">Your name goes on the board, nothing else.</div>';
+}
+function lbWireSignIn() {
+  if (E('bIn')) E('bIn').onclick = lbSignIn;
+  if (E('bEmailIn')) E('bEmailIn').onclick = () => lbEmailAuth('in');
+  if (E('bEmailUp')) E('bEmailUp').onclick = () => lbEmailAuth('up');
+  if (E('bPw')) E('bPw').onkeydown = e => { if (e.key === 'Enter') lbEmailAuth('in'); };
+}
 async function lbSignOut() {
   if (LB.client) await LB.client.auth.signOut();
   await lbSetUser(null);
@@ -1077,6 +1122,10 @@ function lbOpen(mode) {
 function lbClose() { E('board').style.display = 'none'; }
 
 async function lbPaintBoard() {
+  /* Signed out: the sign-in options sit above the list, where the person who
+     just pressed "Sign in to post" is looking. Signed in: below it. */
+  const card = E('bSession').parentNode;
+  card.insertBefore(E('bSession'), LB.user ? E('bClose') : E('bList'));
   E('bTabToday').className = 'tab' + (lbMode === 'today' ? ' on' : '');
   E('bTabMonth').className = 'tab' + (lbMode === 'month' ? ' on' : '');
   E('bTitle').textContent = lbMode === 'today' ? "TODAY'S OVER" : 'LAST 30 DAYS';
@@ -1111,12 +1160,12 @@ function lbPaintAuth() {
   const who = E('who');
   if (!lbEnabled()) { who.textContent = ''; who.onclick = null; }
   else if (LB.user) { who.textContent = '● ' + (LB.name || 'signed in'); who.onclick = () => lbOpen(); }
-  else { who.textContent = 'SIGN IN'; who.onclick = lbSignIn; }
+  else { who.textContent = 'SIGN IN'; who.onclick = () => lbOpen(); }
   const s = E('bSession');
   if (!lbEnabled()) s.innerHTML = '';
   else if (LB.user) s.innerHTML = 'Playing as <b id="bName">' + esc(LB.name || '') + '</b> · <a id="bRename">change name</a> · <a id="bOut">sign out</a>';
-  else s.innerHTML = '<button class="wide" id="bIn">Sign in with Google</button><div class="bNote">One tap. Your name goes on the board, nothing else.</div>';
-  if (E('bIn')) E('bIn').onclick = lbSignIn;
+  else s.innerHTML = lbSignInBlock();
+  lbWireSignIn();
   if (E('bOut')) E('bOut').onclick = lbSignOut;
   if (E('bRename')) E('bRename').onclick = () => {
     s.innerHTML = '<input id="bNameIn" maxlength="24" placeholder="Your name on the board"> <button class="ghost" id="bSave" style="width:auto;padding:8px 12px">Save</button>';
@@ -1143,7 +1192,7 @@ async function lbOnOverEnd(right, grid, bowler) {
     if (E('pRetry')) E('pRetry').onclick = () => lbOnOverEnd(right, grid, bowler);
   } else {
     post.innerHTML = '<button class="wide gold" id="pIn">Sign in to post ' + right + '/6</button>';
-    E('pIn').onclick = lbSignIn;
+    E('pIn').onclick = () => lbOpen('today');
   }
 }
 </script>
