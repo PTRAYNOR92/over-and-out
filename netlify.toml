@@ -4,10 +4,16 @@
 [build]
   publish = "."
 
-# Sensible caching: always re-check the page, but let the browser hold on to
-# the CSS and JS for a while. (Netlify changes their addresses when they change,
-# so visitors never get a stale version.)
+# The page itself is always re-checked, so an update reaches everyone at once.
 [[headers]]
   for = "/index.html"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
+
+# The heavy parts — the 3D engine and the batsman model — are versioned files
+# under /assets/, so a phone downloads them once and keeps them for a year.
+# Changing either means giving it a new file name in build.py.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
