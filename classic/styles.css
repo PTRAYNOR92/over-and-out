@@ -1,0 +1,41 @@
+/* Over & Out — all the styling for the page.
+   Lifted straight out of the original file, unchanged. */
+
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;}
+  body{ background:#070a0f; color:#eaf1f6; font-family:Inter,system-ui,sans-serif; height:100dvh; overflow:hidden;
+        display:flex; flex-direction:column; align-items:center; padding:8px 10px; }
+  #app{ width:100%; max-width:440px; height:100%; display:flex; flex-direction:column; }
+  .top{ position:relative;  display:flex; justify-content:space-between; align-items:center; flex:0 0 auto; padding:2px 4px 6px; }
+  .top h1{ font-family:Anton; font-weight:400; font-size:19px; letter-spacing:.5px; margin:0;}
+  .top h1 b{ color:#36e3c8;}
+  .top .sc{ font-family:'Barlow Condensed'; font-weight:700; font-size:13px; letter-spacing:1px; color:#8aa0b0; text-align:right; line-height:1.25;}
+  .top .sc b{ color:#eaf1f6;}
+  .stage{ position:relative; width:100%; flex:1 1 0; min-height:0; border:1px solid #20313f; border-radius:14px; overflow:hidden; background:#0a0e14;}
+  canvas{ position:absolute; inset:0; width:100%; height:100%;}
+  .controls{ flex:0 0 auto; margin-top:8px; display:flex; flex-direction:column; gap:8px;}
+  .two{ display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .btn{ border:none; border-radius:13px; padding:15px; font-family:Anton; font-weight:400; font-size:21px; letter-spacing:1px; color:#0a0e14; cursor:pointer;}
+  .btn small{ display:block; font-family:Inter; font-size:9px; font-weight:700; letter-spacing:2px; opacity:.55; margin-top:2px;}
+  .btn.out{ background:linear-gradient(180deg,#ff7a6e,#e23b2c);}
+  .btn.not{ background:linear-gradient(180deg,#5fe39a,#28b765);}
+  .btn:disabled{ filter:grayscale(.6) brightness(.5);}
+  .wide{ width:100%; background:#36e3c8; color:#05231e; border:none; border-radius:13px; padding:15px; cursor:pointer;
+         font-family:'Barlow Condensed'; font-weight:700; font-size:18px; letter-spacing:2px; text-transform:uppercase;}
+  .wide.ghost{ background:#13202c; color:#cfe0ea; border:1px solid #26384a;}
+  .hint{ text-align:center; color:#5d7180; font-size:11px; margin-top:2px; min-height:14px; flex:0 0 auto;}
+  #bHelp{ position:absolute; right:10px; top:10px; width:30px; height:30px; border-radius:50%;
+    border:1.5px solid #26384a; background:transparent; color:#8aa0b0; font:700 15px Inter; cursor:pointer; }
+  #bHelp:hover{ border-color:#36e3c8; color:#36e3c8; }
+  #rules{ display:none; position:fixed; inset:0; background:rgba(4,8,12,.94); z-index:50;
+    align-items:center; justify-content:center; padding:18px; }
+  .rulesCard{ max-width:430px; background:#0b1219; border:1px solid #1d2c3a; border-radius:16px; padding:22px 24px; }
+  .rulesCard h2{ font-family:Anton; font-weight:400; font-size:26px; margin:0 0 10px; color:#eaf1f6; letter-spacing:.5px; }
+  .rulesCard p{ font-size:14px; line-height:1.5; color:#b9c7d2; margin:8px 0; }
+  .rulesCard ul{ padding-left:18px; margin:10px 0; }
+  .rulesCard li{ font-size:13.5px; line-height:1.55; color:#b9c7d2; margin:6px 0; }
+  .rulesCard b{ color:#eaf1f6; } .rulesCard .rsmall{ font-size:12.5px; color:#5d7180; }
+  #bRules{ width:100%; margin-top:10px; padding:13px; border:none; border-radius:12px;
+    background:#36e3c8; color:#06231d; font:700 15px Inter; cursor:pointer; }
+  body.clip .top, body.clip .btns, body.clip .hint, body.clip #bHelp{ display:none !important; }
+  body.clip{ padding:0; } body.clip .stage{ border:none; border-radius:0; }

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Over &amp; Out — the daily cricket umpiring game</title>
+<meta name="description" content="Six balls a day. Watch each delivery, call OUT or NOT OUT on the LBW, then see the Hawk-Eye review. Same six balls for everyone. New over every day.">
+<meta name="theme-color" content="#070a0f">
+<meta property="og:title" content="Over & Out — the daily cricket umpiring game">
+<meta property="og:description" content="Six balls. You're the umpire. OUT or NOT OUT? Same six balls for everyone — new over every day.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Over & Out — the daily cricket umpiring game">
+<meta name="twitter:description" content="Six balls. You're the umpire. OUT or NOT OUT? Hawk-Eye decides.">
+
+<!-- ============================================================
+     GOOGLE ANALYTICS  (optional — tells you how many people play)
+     To switch it on:
+       1. Go to analytics.google.com, make a free account + a "web" property for your site.
+       2. It gives you a Measurement ID that looks like  G-Y25S5GX135
+       3. Replace BOTH copies of  G-Y25S5GX135  below with your real ID.
+       4. Save. That's it — leave everything else exactly as it is.
+     Until you do this it simply does nothing (safe to launch as-is).
+============================================================ -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-Y25S5GX135"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-Y25S5GX135');
+</script>
+<!-- ============ end Google Analytics ============ -->
+
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Inter:wght@500;700&display=swap" rel="stylesheet">
+
+<!-- All the styling now lives in its own file -->
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="rules">
+  <div class="rulesCard">
+    <h2>YOU’RE THE UMPIRE 🏏</h2>
+    <p>Six balls a day — the same six for everyone. Watch each delivery, then call <b>OUT</b> or <b>NOT OUT</b> on the LBW appeal. Hawk-Eye shows the truth.</p>
+    <ul>
+      <li><b>Pitched outside LEG stump?</b> Never out. Ever.</li>
+      <li><b>Hit outside OFF stump?</b> Not out — <i>unless he offered no shot</i>.</li>
+      <li><b>Would it hit the stumps?</b> That's your judgment — watch the line, the turn, the height.</li>
+      <li><b>Umpire’s call</b> (just clipping) = full point either way. Too close to blame anyone.</li>
+    </ul>
+    <p class="rsmall">Correct call = 1 point · The over gets harder as it goes · New over every day.</p>
+    <button id="bRules">Got it — let’s umpire</button>
+  </div>
+</div>
+<div id="app">
+  <div class="top">
+    <h1>OVER <b>&amp;</b> OUT</h1>
+    <button id="bHelp" title="How to umpire">?</button>
+    <div class="sc" id="score">BALL <b>1/6</b><br>POINTS <b>0</b></div>
+  </div>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <div class="controls">
+    <div class="two" id="decide" style="display:none">
+      <button class="btn out" id="bOut">OUT<small>raise the finger</small></button>
+      <button class="btn not" id="bNot">NOT OUT<small>keep it down</small></button>
+    </div>
+    <button class="wide" id="bAct">▶ Bowl</button>
+    <button class="wide ghost" id="bShare" style="display:none">📣 Share your grid — challenge a mate</button>
+  </div>
+  <div class="hint" id="hint">Six balls. Watch each one — then make the call.</div>
+</div>
+
+<!-- ============================================================
+     The game code, split into readable chunks.
+     ORDER MATTERS — each file uses things set up by the ones
+     above it, so keep them in this 1-to-9 order.
+============================================================ -->
+<script src="1-setup.js"></script>
+<script src="2-sound.js"></script>
+<script src="3-batsman.js"></script>
+<script src="4-deliveries.js"></script>
+<script src="5-ball-flight.js"></script>
+<script src="6-hawkeye-replay.js"></script>
+<script src="7-summary-screen.js"></script>
+<script src="8-game-state.js"></script>
+<script src="9-game-loop.js"></script>
+</body>
+</html>
