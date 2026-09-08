@@ -4138,11 +4138,26 @@ function rememberResult(right, grid, bowler) {
   return r;
 }
 
+/* ---------- play counter ----------
+   Two anonymous events, so Pat can see how many people actually play: one
+   when the page opens (once per browser session), one when an over ends,
+   with the score. No name, no account, no cookie — just a row with a date. */
+function lbTrack(event, extra) {
+  if (!LB.client) return;
+  try {
+    LB.client.from('plays').insert(Object.assign({ day: todayKey(), event }, extra || {}))
+      .then(() => {}, () => {});
+  } catch (e) { /* counting is never allowed to break the game */ }
+}
+
 /* ---------- auth ---------- */
 async function lbInit() {
   if (!lbEnabled()) { lbPaintAuth(); return; }
   try {
     LB.client = window.supabase.createClient(LB.cfg.supabaseUrl, LB.cfg.supabaseAnonKey);
+    let seen = false;
+    try { seen = !!sessionStorage.getItem('oo3d:visit'); sessionStorage.setItem('oo3d:visit', '1'); } catch (e) { /* private mode */ }
+    if (!seen) lbTrack('visit');
     const { data } = await LB.client.auth.getSession();
     await lbSetUser(data && data.session ? data.session.user : null);
     LB.client.auth.onAuthStateChange((_e, session) => { lbSetUser(session ? session.user : null); });
@@ -4310,6 +4325,7 @@ function lbPaintAuth() {
 /* Called from the end-of-over screen. Decides what the summary says about
    posting, and posts if it can. */
 async function lbOnOverEnd(right, grid, bowler) {
+  lbTrack('over', { score: right, practice: !isDaily() || practice, signed_in: !!LB.user });
   const post = E('post');
   if (!isDaily() || practice) { post.textContent = 'Practice over — not posted.'; return; }
   const r = rememberResult(right, grid, bowler);
