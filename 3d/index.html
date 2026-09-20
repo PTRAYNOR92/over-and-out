@@ -89,12 +89,40 @@
   #bSession input{width:60%;padding:8px;border-radius:8px;border:1px solid var(--line);background:#0a1119;color:var(--ink);font:inherit}
   #bClose{margin-top:10px}
   #lbBtn{display:none}
+  /* quieter frame: the pitch is the hero */
+  .title{font:400 17px/1 var(--display)}
+  .wide{background:#2fcdb4;padding:13px}
+  .wide.gold{background:linear-gradient(180deg,#f7d96a,#e9bd2a)}
+  #impactDim{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:2;
+    transition:opacity .32s ease-out}
+  #impactDim.on{opacity:1;transition:opacity .06s ease-in}
+
+  /* leaderboard button: it sat transparent over the pitch and vanished */
+  #lbBtn{background:rgba(6,10,15,.82);border:1px solid var(--amber);color:var(--amber);
+    box-shadow:0 2px 10px rgba(0,0,0,.35)}
+  /* the umpire card */
+  .nat{display:inline-block;font:700 9.5px var(--label);letter-spacing:1px;color:#0a0e14;background:var(--amber);
+    border-radius:4px;padding:2px 5px;margin-right:7px;vertical-align:1px;min-width:26px;text-align:center}
+  .nat.none{background:#26384a;color:var(--dim)}
+  #bCard{margin-top:10px;background:#0a1119;border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  #bCard .cRow{display:flex;align-items:center;gap:10px}
+  #bCard .cName{flex:1;font:700 15px var(--label);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #bCard .cBtn{width:auto;padding:8px 12px;border-color:var(--teal);color:var(--teal)}
+  #bCard label{display:block;font:700 9.5px var(--label);letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);margin:10px 0 5px}
+  #bCard input,#bCard select{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:8px;border:1px solid #2b5a8a;
+    background:#0d1620;color:var(--ink);font:500 16px var(--label)}
+  #bCard input:focus,#bCard select:focus{outline:none;border-color:var(--teal)}
+  #bCard .cSave{margin-top:10px}
+  #bCard .cCancel{margin-top:6px;padding:9px}
+  #bCard .bNote{padding:6px 0 0}
+
 </style>
 
 <canvas id="cv"></canvas>
+<div id="impactDim"></div>
 <div class="hud">
   <div class="top">
-    <div class="title">OVER <b>&amp;</b> OUT <span>3D prototype</span><span id="bowlerBar"></span><span id="who"></span></div>
+    <div class="title">OVER <b>&amp;</b> OUT <span>The daily LBW over</span><span id="bowlerBar"></span><span id="who"></span></div>
     <div class="rt">
       <div id="count"></div>
       <div id="pips"></div>
@@ -125,7 +153,7 @@
       <button class="call" id="not">NOT OUT<small>KEEP IT DOWN</small></button>
     </div>
     <button class="wide" id="bowl">▶ Bowl</button>
-    <button class="ghost" id="lbBtn">🏆 Today's leaderboard</button>
+    <button class="ghost" id="lbBtn">🏆 Leaderboard</button>
     <button class="wide" id="next" style="display:none">▶ Next ball</button>
     <div class="note">One look. No replay until you've called it.</div>
   </div>
@@ -3390,124 +3418,35 @@ const CHEST_LEAN = Math.tan(12 * D2R);   // about half the rest lean: all of it 
    the absolute points on the pitch his front foot can reach. */
 const GROUP_X = 0.13, GROUP_Z = 1.05;
 
-/* ---------- keyframes ---------- */
+/* ---------- keyframes ----------
+   MEASURED, not authored. Every pose below comes from pose estimation over
+   coaching footage (SIKANA "Front Foot Defence", side-on and bowler's-end
+   takes), scaled onto this body and re-expressed in the rig's own terms:
+   pelvis, hip and shoulder yaw, spine tilt/side, feet, grip. Bat angles are
+   the one thing pose estimation cannot see; those are set by eye from the
+   same frames. See claude/batsman-reference-library.md.
+
+   Coordinates are the figure's own: Y up, +Z toward the bowler, +X leg side.
+   The stance back foot is the anchor at (-0.02, -0.118).
+
+   headUp: 0 = the head continues the line of the spine, 1 = held vertical.
+   legPole/armPole: which way the knee / elbow points, measured. */
 const K = {
-  /* Rebuilt against three references from the bowler's end (Kohli, Richards,
-     and a coaching still) plus one round of Pat's own notes.
+  stance: { pelvis: [0.074, 0.895, 0.002], hipYaw: 88.1, shYaw: -11.2, tilt: -9.0, side: -22.0, headUp: 0.15, backFoot: [-0.02, 0.071, -0.118], frontFoot: [0.002, 0.071, 0.133], grip: [-0.165, 0.931, -0.1], batEl: 20, batAz: 200, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  trigger: { pelvis: [0.074, 0.87, -0.082], hipYaw: 85.0, shYaw: -15.4, tilt: -9.0, side: -21.0, headUp: 0.15, backFoot: [-0.02, 0.071, -0.118], frontFoot: [0.002, 0.071, 0.102], grip: [-0.165, 0.949, -0.12], batEl: 46, batAz: 212, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  backlift: { pelvis: [0.079, 0.83, -0.122], hipYaw: 76.2, shYaw: -6.1, tilt: -12.0, side: -18.0, headUp: 0.2, backFoot: [-0.02, 0.071, -0.118], frontFoot: [0.021, 0.071, 0.121], grip: [-0.25, 0.913, -0.187], batEl: 128, batAz: 226, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  top: { pelvis: [0.096, 0.795, -0.094], hipYaw: 74.8, shYaw: -4.2, tilt: -14.0, side: -21.0, headUp: 0.3, backFoot: [-0.02, 0.071, -0.118], frontFoot: [-0.034, 0.071, 0.206], grip: [-0.281, 0.912, -0.214], batEl: 156, batAz: 232, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  raise: { pelvis: [0.094, 0.915, -0.018000000000000002], hipYaw: 82, shYaw: -14, tilt: -6, side: -16, headUp: 0.3, backFoot: [-0.02, 0.071, -0.118], frontFoot: [0.002, 0.071, 0.133], grip: [-0.2, 1.3, -0.1], batEl: 150, batAz: 236, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99], armPoleL: [0.6, 0.2, 0.75], armPoleR: [0.7, 0.1, -0.7] },
+  raised: { pelvis: [0.11399999999999999, 0.925, -0.038], hipYaw: 80, shYaw: -12, tilt: -4, side: -12, headUp: 0.35, backFoot: [0.0, 0.071, -0.148], frontFoot: [0.002, 0.071, 0.133], grip: [-0.22, 1.52, -0.06], batEl: 176, batAz: 250, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99], armPoleL: [0.5, 0.3, 0.8], armPoleR: [0.8, 0.2, -0.55] },
+  settle: { pelvis: [0.074, 0.905, 0.012], hipYaw: 84, shYaw: -16, tilt: -4, side: -14, headUp: 0.45, backFoot: [-0.02, 0.071, -0.118], frontFoot: [0.002, 0.071, 0.133], grip: [-0.17, 0.95, 0.0], batEl: 20, batAz: 200, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] }
+};
 
-     hipYaw is how far ROUND he is: 90 is fully side-on, 0 is chest square to
-     the bowler. It sat at 44 — half open — while the feet were a shoulder-width
-     apart along the crease, and those two do not go together: at 44 the leading
-     hip swings out to the leg side while its own foot is still over on the off
-     side, so the front leg has to angle across the back one. That was the
-     crossed-legs look. 80 puts the hip line down the pitch, and each leg then
-     splays gently outward from under its own hip.
-
-     Feet are also closer together than they were (0.25m rather than 0.33m),
-     which is what a real stance looks like and keeps the knees flexed rather
-     than propping him up on straight legs. */
-  /* Feet NARROWER and split down the pitch rather than across it. At 0.25m
-     apart across the crease you saw two separate pads side by side with daylight
-     between them, which is the one thing that never happens in a real stance —
-     from the bowler's end you see the front pad and, at most, a sliver of the
-     back one behind it. 0.18m across and 0.14m of depth puts the back leg
-     behind the front where it belongs.
-
-     The bat is also up off the ground now. Planted, it read as a man leaning on
-     it; lifted, the toe about 10cm clear and angled back toward the slips, he
-     reads as a batsman who is ready — and it gives the backlift somewhere to
-     start from rather than beginning at zero.
-
-     Worth knowing if you tune batEl: the bat is 0.90m long from the wrist, not
-     the 0.65m its rest-pose bounding box suggests, so anything below about 38
-     degrees buries the toe in the pitch. It had been sunk 10cm into the ground
-     in the stance and 22cm at the moment of contact, hidden behind the pads. */
-  /* Hips and shoulders now go OPPOSITE ways, which is what a real address looks
-     like and what fixes both halves of the same complaint. Hips at 86 are almost
-     fully side-on, so the back pad disappears behind the front one. Shoulders at
-     minus 22 relative to them — 64 absolute — turn the chest back toward the
-     umpire, so you see his shoulder width and the front of his shirt instead of
-     a narrow edge. Before, the shoulders were rotated FURTHER round than the
-     hips, which is the wrong way and gave both the visible back pad and the
-     thin, edge-on torso. */
-  /* Rebuilt a third time, against a square-on photograph of Rahul at address.
-     Five things separated it from the real thing, and all five are here:
-
-     FEET nearly in line. His two boots sit within a boot-width of each other
-     across the pitch, with the stagger running DOWN the pitch instead. 6cm
-     across and 20cm deep, where it was 15 and 16. That lateral gap was what put
-     daylight between the two pads; closed up, they read as one shape with a
-     sliver of the back pad behind, which is what you actually see.
-
-     HINGE. He is bent 33 degrees at the hips with his backside pushed out
-     behind him. At 22 ours read as a man standing up holding a bat. This is the
-     single biggest difference between the two pictures.
-
-     HEAD FORWARD. His chin is out over his front foot, not stacked above his
-     hips. The head direction used to be 78% vertical — deliberately, so it
-     would not tip about — and that was working against the whole shape.
-
-     HANDS DOWN AND IN. Mid-thigh, tucked close to the front hip, forearms
-     nearly vertical.
-
-     BAT ON THE GROUND at rest. The lift you wanted now happens through the
-     run-up, which is when it happens in life, rather than being held up before
-     the bowler has moved. */
-  /* A HINGE, NOT A STOOP — the distinction that took three passes to see.
-     Rotating the spine 33 degrees while leaving the pelvis roughly under him
-     curled his back over like a question mark and dropped his chin onto his
-     chest. Rahul's back is a straight line at an angle, and the thing that lets
-     it stay straight is his backside being pushed out BEHIND him as the
-     counterweight. So the pelvis goes back 5cm further and the spine angle comes
-     down to 27: the hips take the bend, the back stops curling.
-
-     The bat and the hands are one problem, not two. Dropping the hands to
-     mid-thigh forced the bat to rake out to 44 degrees just to reach the ground,
-     which from square looks like a man leaning on a walking stick. Rahul's
-     gloves are nearer hip height — level with the top of the pad — and his bat
-     hangs close to vertical. Hands back up to 0.80 and the bat comes in to 27,
-     and now both are right at once. */
-  /* Two last things off the photograph.
-
-     MORE BUM OUT. The hinge was there but the pelvis was barely behind his
-     heels, so the shape read as a lean rather than a sit-back. Pelvis goes back
-     another 5cm and the spine angle up to 31, which puts his backside about
-     14cm behind the heel of his back foot and his shoulders 23cm in front of
-     his hips — the counterweighted shape rather than a topple.
-
-     BACK LEG HIDDEN. The two feet were 6cm apart across the pitch, which sounds
-     like nothing until you work out what it does on screen: at twenty metres the
-     pad is 28 pixels wide and the offset was 10 of them, so a third of the back
-     pad stuck out. They are now aligned for the CAMERA rather than on paper —
-     the back foot sits fractionally to the off, because it is 20cm further away
-     and perspective would otherwise swing it out to the leg side. From the
-     umpire's end the back leg now sits directly behind the front one. */
-  stance:   { pelvis: [-0.010, 0.814, -0.215], hipYaw: 86, shYaw: -22, tilt: 31, side: -4,
-              backFoot: [-0.020, 0.071, -0.118], frontFoot: [-0.034, 0.071, 0.082],
-              grip: [-0.112, 0.925, 0.074], batEl: 24, batAz: 202 },
-  trigger:  { pelvis: [0.010, 0.812, -0.234], hipYaw: 88, shYaw: -20, tilt: 32, side: -1,
-              backFoot: [-0.004, 0.073, -0.142], frontFoot: [-0.030, 0.075, 0.070],
-              grip: [-0.096, 0.979, 0.068], batEl: 54, batAz: 206 },
-  backlift: { pelvis: [0.016, 0.818, -0.240], hipYaw: 90, shYaw: -14, tilt: 32, side: 1,
-              backFoot: [0.000, 0.073, -0.142], frontFoot: [-0.028, 0.077, 0.072],
-              grip: [-0.008, 1.081, -0.046], batEl: 118, batAz: 206 },
-  top:      { pelvis: [0.020, 0.823, -0.246], hipYaw: 88, shYaw: -8, tilt: 31, side: 2,
-              backFoot: [0.004, 0.073, -0.146], frontFoot: [-0.024, 0.111, 0.100],
-              grip: [0.018, 1.144, -0.074], batEl: 148, batAz: 208 },
-  raise:    { pelvis: [0.034, 0.851, -0.226], hipYaw: 84, shYaw: -12, tilt: 25, side: 4,
-              backFoot: [0.042, 0.073, -0.150], frontFoot: [-0.048, 0.073, 0.034],
-              grip: [-0.050, 1.250, -0.010], batEl: 158, batAz: 236 },
-  raised:   { pelvis: [0.046, 0.868, -0.238], hipYaw: 80, shYaw: -10, tilt: 22, side: 6,
-              backFoot: [0.050, 0.073, -0.168], frontFoot: [-0.042, 0.073, 0.016],
-              grip: [-0.105, 1.340, 0.000], batEl: 170, batAz: 250 },
-  /* He does not hold the end of his shot for three seconds while you decide.
-     Whatever shape the follow-through ended in, he stands up out of it, drops
-     the bat back to the ground and turns to look at the umpire — which is
-     exactly what a batsman does during an appeal. This is what stops the odd
-     ugly follow-through being the thing you stare at. */
-  settle:   { pelvis: [0.002, 0.857, -0.186], hipYaw: 82, shYaw: -18, tilt: 24, side: 0,
-              backFoot: [-0.012, 0.071, -0.124], frontFoot: [-0.036, 0.071, 0.086],
-              grip: [-0.132, 0.954, 0.054], batEl: 21, batAz: 198 }
+const FWD = {
+  stride1: { pelvis: [-0.129, 0.761, -0.029], hipYaw: 72.4, shYaw: -5.8, tilt: -4.0, side: -17.0, headUp: 0.25, backFoot: [-0.02, 0.071, -0.118], frontFoot: [-0.177, 0.088, 0.388], grip: [-0.38, 0.924, -0.032], batEl: 138, batAz: 228, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  stride2: { pelvis: [-0.133, 0.8, 0.151], hipYaw: 68.4, shYaw: -15.7, tilt: 0.0, side: -15.0, headUp: 0.2, backFoot: [-0.02, 0.075, -0.118], frontFoot: [-0.151, 0.071, 0.536], grip: [-0.411, 0.96, 0.252], batEl: 108, batAz: 216, legPoleL: [-0.25, 0.0, 0.97], legPoleR: [-0.15, 0.0, 0.99] },
+  plant: { pelvis: [-0.105, 0.8, 0.2], hipYaw: 66.0, shYaw: -16.5, tilt: 8.0, side: -14.0, headUp: 0.1, backFoot: [-0.02, 0.093, -0.118], frontFoot: [-0.03, 0.071, 0.557], grip: [-0.29, 0.925, 0.393], batEl: 62, batAz: 196, legPoleL: [-0.03, 0.25, 0.97], legPoleR: [-0.15, 0.0, 0.99], armPoleL: [-0.3, 0.35, 0.85], armPoleR: [0.7, -0.5, -0.4] },
+  contact: { pelvis: [-0.088, 0.79, 0.32], hipYaw: 64.0, shYaw: -11.2, tilt: 16.0, side: -15.0, headUp: 0.05, backFoot: [-0.02, 0.13, -0.09], frontFoot: [0.015, 0.08, 0.622], grip: [-0.225, 0.799, 0.674], batEl: 32, batAz: 178, legPoleL: [0.25, 0.14, 0.96], legPoleR: [-0.15, 0.0, 0.99], armPoleL: [-0.3, 0.35, 0.85], armPoleR: [0.7, -0.5, -0.4] },
+  hold: { pelvis: [-0.093, 0.8, 0.33], hipYaw: 65.0, shYaw: -10.1, tilt: 16.0, side: -16.0, headUp: 0.1, backFoot: [-0.02, 0.14, -0.085], frontFoot: [-0.036, 0.071, 0.584], grip: [-0.276, 0.794, 0.663], batEl: 28, batAz: 174, legPoleL: [0.21, 0.07, 0.98], legPoleR: [-0.15, 0.0, 0.99], armPoleL: [-0.3, 0.35, 0.85], armPoleR: [0.7, -0.5, -0.4] }
 };
 
 /* The keeper and the slips are the same model in a different shape. They face
@@ -3546,86 +3485,204 @@ function handsOnKnees(S) {
 }
 
 
+function aimAt(T, F, fx, fz, gx, gz) {
+  /* Move a measured template so its front foot lands on F. The pelvis follows
+     the foot by fx/fz of the shift and the hands by gx/gz, which is how the
+     measured poses relate the three: the body goes with the stride, the
+     hands go with the ball. */
+  const dx = F[0] - T.frontFoot[0], dz = F[2] - T.frontFoot[2];
+  return Object.assign({}, T, {
+    frontFoot: [F[0], T.frontFoot[1], F[2]],
+    pelvis: [T.pelvis[0] + dx * fx, T.pelvis[1], T.pelvis[2] + dz * fz],
+    grip:   [T.grip[0] + dx * gx,   T.grip[1],   T.grip[2] + dz * gz]
+  });
+}
+
 function dynamicPoses(d) {
   const fwd = d.forward;
   const rawX = d.ix - GROUP_X, rawZ = d.iz - GROUP_Z;
   /* A yorker beats the front foot and strikes low behind it, so steering the
      front leg onto that impact would drag him backwards mid-stride. */
-  const onFrontPad = fwd ? rawZ > 0.15 : true;
+  const onFrontPad = fwd ? rawZ > 0.0 : true;
   const lx = onFrontPad ? clamp(rawX, -0.52, 0.29) : -0.14;
   const lz = onFrontPad ? clamp(rawZ, -0.45, 0.62) : 0.36;
   const footX = lx - 0.045, footZ = lz + (fwd ? 0.120 : 0.010);
 
-  /* Two things made the shot look like his legs cross. The hips snapped almost
-     square (34) while the front foot went out to the off, so the leading hip
-     ended up on the far side of its own foot; and the stride was clamped so
-     short that the front leg travelled sideways instead of down the pitch.
-     Opening only to ~52, letting the hips TRAVEL forward with the stride and
-     dropping them into the lunge fixes both — a long stride reads as a stride,
-     a short one reads as a tangle. */
-  const contact = fwd ? {
-    pelvis: [0.030, 0.829, lz * 0.72 - 0.020], hipYaw: 52, shYaw: 8, tilt: 26, side: -4,
-    backFoot: [0.210, 0.141, -0.080], frontFoot: [footX, ANKLE_H, footZ],
-    grip: [lx + 0.030, 0.884, lz + 0.127], batEl: 32, batAz: 356
-  } : {
-    pelvis: [0.055, 0.885, -0.165], hipYaw: 74, shYaw: 9, tilt: 18, side: 2,
-    backFoot: [0.128, ANKLE_H, -0.215], frontFoot: [footX, ANKLE_H, footZ],
-    grip: [lx - 0.150, 1.033, lz + 0.042], batEl: 22, batAz: 352
-  };
-
-  const T = K.top;
-  const mixv = (a, b, f) => [lerp(a[0], b[0], f[0]), lerp(a[1], b[1], f[1]), lerp(a[2], b[2], f[2])];
-  const stride = {
-    pelvis: mixv(T.pelvis, contact.pelvis, [0.75, 0.72, 0.85]),
-    hipYaw: lerp(T.hipYaw, contact.hipYaw, 0.55),   // hips lead
-    shYaw:  lerp(T.shYaw, contact.shYaw, 0.15),     // shoulders lag: the coil
-    tilt:   lerp(T.tilt, contact.tilt, 0.70),
-    side:   lerp(T.side, contact.side, 0.60),
-    backFoot: [lerp(T.backFoot[0], contact.backFoot[0], 0.6), ANKLE_H + 0.012,
-               lerp(T.backFoot[2], contact.backFoot[2], 0.6)],
-    frontFoot: contact.frontFoot.slice(),           // foot down early
-    grip:   mixv(T.grip, contact.grip, [0.30, 0.22, 0.30]),
-    batEl:  lerp(T.batEl, contact.batEl, 0.20),
-    batAz:  lerp(T.batAz, contact.batAz, 0.30)
-  };
-  /* The follow-through. This used to stand him bolt upright with the bat swung
-     out to 60-72 degrees, which from behind reads as a man holding a plank flat
-     across his chest waiting for a bus. A defensive shot has almost no
-     follow-through: the bat stops, the body stays down over it, and the blade
-     comes up only a little and stays close to vertical. So this is now a small
-     continuation of the contact pose rather than a different pose. */
-  const through = fwd ? {
-    pelvis: [contact.pelvis[0] - 0.012, contact.pelvis[1] + 0.018, contact.pelvis[2] + 0.030],
-    hipYaw: 48, shYaw: 4, tilt: 24, side: -5,
-    backFoot: [contact.backFoot[0] - 0.015, 0.166, contact.backFoot[2] + 0.025],
-    frontFoot: contact.frontFoot.slice(),
-    grip: [contact.grip[0] - 0.070, 1.024, contact.grip[2] + 0.050],
-    batEl: 34, batAz: 6
-  } : {
-    pelvis: [contact.pelvis[0], contact.pelvis[1] + 0.004, contact.pelvis[2] - 0.010],
-    hipYaw: 70, shYaw: 10, tilt: 17, side: 3,
-    backFoot: contact.backFoot.slice(), frontFoot: contact.frontFoot.slice(),
-    grip: [contact.grip[0] - 0.030, 1.073, contact.grip[2] + 0.020],
-    batEl: 20, batAz: 358
-  };
-  return { stride, contact, through };
+  if (fwd) {
+    const TT = d._drive ? DRV : FWD;
+    /* Forward defence: the measured stride, aimed. The foot travels toward
+       the target through the stride keys so the pad arrives because the leg
+       reached it, not because the figure slid. */
+    /* Aim the LEG, not the foot. The measured front knee sits well ahead of
+       the ankle at contact, so a pad struck on the knee roll is further down
+       the pitch than the boot. Solve the pose once, see where the pad is at
+       the ball's height, and move the foot target by the difference. */
+    let F = [footX, ANKLE_H, footZ];
+    if (onFrontPad) {
+      const iy = clamp(d.iy, 0.06, 0.95);
+      for (let it = 0; it < 2; it++) {
+        const J = solveSkeleton(aimAt(TT.contact, F, 0.55, 0.65, 0.85, 0.90));
+        const leg = frontLegAt(J, iy);
+        F = [clamp(F[0] + (rawX - leg.x), -0.60, 0.34), ANKLE_H, clamp(F[2] + (rawZ - leg.z), 0.05, 0.78)];
+      }
+    }
+    const partial = (T, k) => aimAt(T, [lerp(T.frontFoot[0], F[0], k), 0, lerp(T.frontFoot[2], F[2], k)], 0.55, 0.65, 0.85, 0.90);
+    const stride1 = partial(TT.stride1, 0.35);
+    const stride2 = partial(TT.stride2, 0.75);
+    const plant   = aimAt(TT.plant,   F, 0.55, 0.65, 0.85, 0.90);
+    const contact = aimAt(TT.contact, F, 0.55, 0.65, 0.85, 0.90);
+    if (d._drive) {
+      const A = T => aimAt(T, F, 0.55, 0.65, 0.85, 0.90);
+      return { dtop: DRV.dtop, stride1, stride2, plant, contact, through: A(DRV.through), up: A(DRV.up), check: A(DRV.check) };
+    }
+    const hold    = aimAt(FWD.hold,    F, 0.55, 0.65, 0.85, 0.90);
+    return { stride1, stride2, plant, contact, hold };
+  }
+  /* Back-foot defence, measured from the bowler's-end take (SIKANA "Back Foot
+     Defence", 50.2-53.9s): the back foot goes back AND across toward the
+     stumps, the front foot is drawn back onto its toe, the body stays tall
+     with the shoulders over the off side, the hands finish high in front of
+     the front pad with the front elbow up. Depth (Z) comes from the side-on
+     hold frame; lateral and height from the end-on frames. */
+  let F = [footX, ANKLE_H, footZ];
+  const bcontactT = BACK.contact;
+  let dxb = F[0] - bcontactT.frontFoot[0], dzb = F[2] - bcontactT.frontFoot[2];
+  const shiftB = (T, k) => Object.assign({}, T, {
+    frontFoot: [T.frontFoot[0] + dxb * k, T.frontFoot[1], T.frontFoot[2] + dzb * k],
+    backFoot:  [T.backFoot[0]  + dxb * k * 0.9, T.backFoot[1], T.backFoot[2] + dzb * k * 0.6],
+    pelvis:    [T.pelvis[0]    + dxb * k * 0.9, T.pelvis[1],   T.pelvis[2]   + dzb * k * 0.7],
+    grip:      [T.grip[0]      + dxb * k * 0.95, T.grip[1],    T.grip[2]     + dzb * k * 0.9]
+  });
+  {
+    const iy = clamp(d.iy, 0.06, 0.95);
+    for (let it = 0; it < 2; it++) {
+      const J = solveSkeleton(shiftB(BACK.contact, 1));
+      const leg = frontLegAt(J, iy);
+      F = [clamp(F[0] + (rawX - leg.x), -0.60, 0.34), ANKLE_H, clamp(F[2] + (rawZ - leg.z), -0.55, 0.40)];
+      dxb = F[0] - bcontactT.frontFoot[0]; dzb = F[2] - bcontactT.frontFoot[2];
+    }
+  }
+  return { stride1: shiftB(BACK.stride, 0.6), contact: shiftB(BACK.contact, 1), hold: shiftB(BACK.hold, 1) };
 }
 
-const SEG_RUN   = [['stance', 'stance', 0, 0.30], ['stance', 'trigger', 0.30, 0.70],
-                   ['trigger', 'backlift', 0.70, 1]];
-const SEG_SHOT  = [['backlift', 'top', 0, 0.20], ['top', 'stride', 0.20, 0.64],
-                   ['stride', 'contact', 0.64, 1], ['contact', 'through', 1, 1.30],
-                   ['through', 'settle', 1.30, 1.95]];
+/* Measured back-foot defence (figure frame; stance back foot at -0.02,-0.118). */
+const BACK = {
+  stride:  { pelvis: [-0.06, 0.870, -0.250], hipYaw: 72, shYaw: -6, tilt: -4, side: -26, headUp: 0.30,
+             backFoot: [-0.18, 0.071, -0.340], frontFoot: [-0.04, 0.100, -0.070],
+             grip: [-0.38, 0.82, -0.30], batEl: 150, batAz: 236,
+             legPoleL: [-0.25, 0, 0.97], legPoleR: [-0.15, 0, 0.99], armPoleL: [0.3, -0.2, 0.93], armPoleR: [0.6, -0.3, -0.74] },
+  contact: { pelvis: [-0.18, 0.935, -0.380], hipYaw: 70, shYaw: 0, tilt: 4, side: -27, headUp: 0.45,
+             backFoot: [-0.28, 0.071, -0.420], frontFoot: [-0.14, 0.100, -0.330],
+             grip: [-0.40, 1.16, -0.02], batEl: 18, batAz: 350,
+             legPoleL: [-0.2, 0, 0.98], legPoleR: [-0.15, 0, 0.99], armPoleL: [-0.4, 0.55, 0.75], armPoleR: [0.7, -0.4, -0.5] },
+  hold:    { pelvis: [-0.18, 0.940, -0.380], hipYaw: 70, shYaw: 0, tilt: 4, side: -24, headUp: 0.50,
+             backFoot: [-0.28, 0.071, -0.420], frontFoot: [-0.14, 0.100, -0.330],
+             grip: [-0.38, 1.27, 0.00], batEl: 14, batAz: 352,
+             legPoleL: [-0.2, 0, 0.98], legPoleR: [-0.15, 0, 0.99], armPoleL: [-0.5, 0.75, 0.4], armPoleR: [0.7, -0.3, -0.55] }
+};
+
+/* The straight drive. Same footwork as the forward defence — the SIKANA
+   "Straight Drive" side-on takes (58–62 s and 92–96 s) fit the same stride —
+   with a high backlift, a full bat arc and the high finish. Measured at the
+   finish: hips square to the bowler (hipYaw 1–14), trunk leaning 21–22° down
+   the pitch, back heel 19–27 cm up, head over the front knee at ~1.25 m, hands
+   1.5–1.7 m high a third of a metre in front of the body. Tempered the same
+   way as the defence. In this game the drive is the shot he plays to a full
+   ball and MISSES: at impact the bat is still on its way down behind the pad
+   (beaten for pace, or played across it), then the swing completes. */
+const DRV = (() => {
+  const c = FWD.contact, h = FWD.hold, p = FWD.plant, s1 = FWD.stride1, s2 = FWD.stride2;
+  const dtop = Object.assign({}, K.top, { grip: [-0.30, 1.10, -0.26], batEl: 168, batAz: 232, armPoleL: [0.4, 0.4, 0.8], armPoleR: [0.8, 0.2, -0.5] });
+  const stride1 = Object.assign({}, s1, { grip: [s1.grip[0], s1.grip[1] + 0.12, s1.grip[2]], batEl: 162, batAz: 230 });
+  const stride2 = Object.assign({}, s2, { grip: [s2.grip[0], s2.grip[1] + 0.10, s2.grip[2] - 0.10], batEl: 148, batAz: 226 });
+  const plant = Object.assign({}, p, { grip: [p.grip[0] - 0.02, p.grip[1] + 0.06, p.grip[2] - 0.20], batEl: 118, batAz: 214 });
+  const contact = Object.assign({}, c, { hipYaw: 52, shYaw: -14, tilt: 20, side: -14, headUp: 0.05,
+    grip: [c.frontFoot[0] - 0.20, 0.94, c.frontFoot[2] - 0.12], batEl: 55, batAz: 196, armPoleL: [-0.2, 0.3, 0.9], armPoleR: [0.75, -0.4, -0.4] });
+  const through = Object.assign({}, c, { hipYaw: 44, shYaw: -12, tilt: 22, side: -10, headUp: 0.05,
+    pelvis: [c.pelvis[0], c.pelvis[1] - 0.01, c.pelvis[2] + 0.05],
+    grip: [c.frontFoot[0] - 0.16, 0.80, c.frontFoot[2] + 0.16], batEl: 14, batAz: 0, armPoleL: [-0.3, 0.3, 0.9], armPoleR: [0.7, -0.3, -0.6] });
+  // the bat goes forward and UP, then over the top: two waypoints so the blend
+  // never sweeps it round through the leg side like a flick
+  const up = Object.assign({}, c, { hipYaw: 38, shYaw: -12, tilt: 22, side: -8, headUp: 0.06,
+    pelvis: [c.pelvis[0], c.pelvis[1] - 0.02, c.pelvis[2] + 0.06],
+    backFoot: [c.backFoot[0], 0.16, c.backFoot[2] + 0.01],
+    grip: [c.frontFoot[0] - 0.10, 1.05, c.frontFoot[2] + 0.30], batEl: 95, batAz: 0, armPoleL: [-0.3, 0.4, 0.85], armPoleR: [0.6, -0.1, -0.75] });
+  // Pat: "the follow-through is silly — if it stopped about halfway through it'd
+  // be good". So it does: a checked finish, bat pointing up the pitch at about
+  // forty degrees, hands at chest height, held.
+  const check = Object.assign({}, h, { hipYaw: 36, shYaw: -10, tilt: 20, side: -6, headUp: 0.10,
+    pelvis: [h.pelvis[0], h.pelvis[1] - 0.03, h.pelvis[2] + 0.05],
+    backFoot: [h.backFoot[0], 0.17, h.backFoot[2] + 0.02], legPoleL: [0.1, 0.2, 0.97],
+    grip: [h.frontFoot[0] - 0.08, 1.12, h.frontFoot[2] + 0.24], batEl: 118, batAz: 5, armPoleL: [-0.3, 0.45, 0.85], armPoleR: [0.6, -0.1, -0.75] });
+  return { dtop, stride1, stride2, plant, contact, through, up, check };
+})();
+
+/* No shot offered, ball at the stumps: the pad-away. The leave's upper body
+   (hands at the helmet, bat straight up) over a long front-leg thrust down
+   the pitch, pad leading. Held through the appeal, as in the Lancashire
+   clip. The front foot is aimed exactly as the forward defence's is. */
+function padawayPoses(d) {
+  const rawX = d.ix - GROUP_X, rawZ = d.iz - GROUP_Z;
+  const lx = clamp(rawX, -0.52, 0.29), lz = clamp(rawZ, 0.15, 0.62);
+  const F = [lx - 0.045, ANKLE_H, lz + 0.12];
+  const R = K.raised;
+  const padaway = Object.assign({}, R, {
+    frontFoot: F,
+    pelvis: [R.pelvis[0] - 0.02, 0.850, R.pelvis[2] + F[2] * 0.22],
+    hipYaw: 76, shYaw: -10, tilt: 8, side: -10, headUp: 0.5,
+    grip: [-0.20, 1.50, -0.06], batEl: 178, batAz: 250,
+    legPoleL: [-0.2, 0.25, 0.95], armPoleL: [0.5, 0.3, 0.8], armPoleR: [0.8, 0.2, -0.55]
+  });
+  const mid = Object.assign({}, K.raise, {
+    frontFoot: [lerp(R.frontFoot[0], F[0], 0.5), 0.12, lerp(R.frontFoot[2], F[2], 0.5)],
+    pelvis: [R.pelvis[0] - 0.01, 0.865, R.pelvis[2] + F[2] * 0.10], tilt: 4, side: -12
+  });
+  return { padaway1: mid, padaway };
+}
+
+/* Timelines. Run-up: 0..1 over the bowler's approach. Shot: 0 = release,
+   1 = impact, then the hold and the settle while the appeal runs. Fractions
+   come from the footage, compressed to real ball speeds: the stride begins
+   about a fifth of the way through the flight and the foot is planted well
+   before the ball arrives. */
+const SEG_RUN   = [['stance', 'stance', 0, 0.25], ['stance', 'trigger', 0.25, 0.65],
+                   ['trigger', 'backlift', 0.65, 1]];
+const SEG_SHOT  = [['backlift', 'top', 0, 0.18], ['top', 'stride1', 0.18, 0.40],
+                   ['stride1', 'stride2', 0.40, 0.60], ['stride2', 'plant', 0.60, 0.82],
+                   ['plant', 'contact', 0.82, 1], ['contact', 'hold', 1, 1.30],
+                   ['hold', 'settle', 1.30, 1.95]];
+const SEG_BACK  = [['backlift', 'top', 0, 0.18], ['top', 'stride1', 0.18, 0.55],
+                   ['stride1', 'contact', 0.55, 1], ['contact', 'hold', 1, 1.30],
+                   ['hold', 'settle', 1.30, 1.95]];
 const SEG_LEAVE = [['backlift', 'top', 0, 0.22], ['top', 'raise', 0.22, 0.60],
                    ['raise', 'raised', 0.60, 1], ['raised', 'raised', 1, 1.30],
                    ['raised', 'settle', 1.30, 1.95]];
+const SEG_PAD   = [['backlift', 'top', 0, 0.18], ['top', 'padaway1', 0.18, 0.60],
+                   ['padaway1', 'padaway', 0.60, 1], ['padaway', 'padaway', 1, 1.30],
+                   ['padaway', 'settle', 1.30, 1.95]];
+const SEG_DRIVE = [['backlift', 'dtop', 0, 0.18], ['dtop', 'stride1', 0.18, 0.40],
+                   ['stride1', 'stride2', 0.40, 0.60], ['stride2', 'plant', 0.60, 0.82],
+                   ['plant', 'contact', 0.82, 1], ['contact', 'through', 1, 1.12],
+                   ['through', 'up', 1.12, 1.26], ['up', 'check', 1.26, 1.42],
+                   ['check', 'check', 1.42, 1.72], ['check', 'settle', 1.72, 1.95]];
 
 const V3 = ['pelvis', 'backFoot', 'frontFoot', 'grip'];
-const NUM = ['hipYaw', 'shYaw', 'tilt', 'side', 'batEl', 'batAz'];
+const NUM = ['hipYaw', 'shYaw', 'tilt', 'side', 'batEl', 'batAz', 'headUp', 'armPoleW'];
+const POLES = { legPoleL: [-0.12, 0, 1], legPoleR: [0.10, 0, 1], armPoleL: [-0.45, -1, -0.15], armPoleR: [0.15, -1, -0.25] };
+const DEFAULTS = { headUp: 0.60, armPoleW: 0.5 };
 function mixK(a, b, t) {
   const o = {};
   for (const k of V3) o[k] = [lerp(a[k][0], b[k][0], t), lerp(a[k][1], b[k][1], t), lerp(a[k][2], b[k][2], t)];
-  for (const k of NUM) o[k] = lerp(a[k], b[k], t);
+  for (const k of NUM) {
+    const av = a[k] === undefined ? DEFAULTS[k] : a[k], bv = b[k] === undefined ? DEFAULTS[k] : b[k];
+    o[k] = lerp(av, bv, t);
+  }
+  for (const k in POLES) {
+    const av = a[k] || POLES[k], bv = b[k] || POLES[k];
+    const v = [lerp(av[0], bv[0], t), lerp(av[1], bv[1], t), lerp(av[2], bv[2], t)];
+    const n = Math.hypot(v[0], v[1], v[2]) || 1;
+    o[k] = [v[0] / n, v[1] / n, v[2] / n];
+  }
   return o;
 }
 function walk(segs, bank, p) {
@@ -3701,12 +3758,37 @@ function solveSkeleton(S) {
   const grip = new THREE.Vector3(...S.grip);
   /* Both hands go to the one grip unless a pose says otherwise — a fielder
      with a hand on each knee gives each arm its own target. */
+  /* Two hands on one handle. The keyframe gives the middle of the grip; the
+     top hand (left, for a right-hander) sits above it on the handle and the
+     bottom hand below, so the forearms arrive one above the other instead of
+     converging on a point like a pair of tongs. */
+  const el0 = S.batEl * D2R, az0 = S.batAz * D2R;
+  const batDir0 = new THREE.Vector3(Math.sin(el0) * Math.sin(az0), -Math.cos(el0), Math.sin(el0) * Math.cos(az0)).normalize();
+  /* The bat mesh is bound to hand.L (the top hand), so the top hand stays on
+     the keyframe's grip point and the bottom hand sits 9cm further down the
+     handle toward the blade. */
+  const HAND_GAP = 0.09;
   const gripL = S.gripL ? new THREE.Vector3(...S.gripL) : grip;
-  const gripR = S.gripR ? new THREE.Vector3(...S.gripR) : grip;
+  const gripR = S.gripR ? new THREE.Vector3(...S.gripR) : grip.clone().addScaledVector(batDir0, HAND_GAP);
   /* Top hand (left, front) elbow tucks in toward the off side; bottom hand
      (right, back) elbow sits out and slightly behind. */
-  const armL = ik2(shL, gripL, BONE.upper_arm, BONE.forearm, S.armPoleL ? new THREE.Vector3(...S.armPoleL) : new THREE.Vector3(-0.45, -1, -0.15));
-  const armR = ik2(shR, gripR, BONE.upper_arm, BONE.forearm, S.armPoleR ? new THREE.Vector3(...S.armPoleR) : new THREE.Vector3(0.15, -1, -0.25));
+  /* Elbows. An elbow points away from the body's midline, down when the hands
+     are low and out-and-forward when they are raised; it never points at the
+     chest. That is computed from the pose here, so it is right in every
+     in-between frame, and a keyframe can only nudge it (armPoleL/R), not
+     replace it — a pole measured off video is noisy when the arm is nearly
+     straight, and a wrong pole is a dislocated arm. */
+  const chestFwd0 = new THREE.Vector3(-shAx.z, 0, shAx.x);
+  const elbowPole = (sh, target, sign, given) => {
+    const lift = clamp((target.y - sh.y + 0.10) / 0.50, 0, 1);
+    const p = new THREE.Vector3().addScaledVector(shAx, sign * 0.70)
+      .add(new THREE.Vector3(0, lerp(-0.70, 0.30, lift), 0))
+      .addScaledVector(chestFwd0, lerp(-0.25, 0.40, lift)).normalize();
+    if (given) p.lerp(new THREE.Vector3(...given).normalize(), S.armPoleW === undefined ? 0.5 : S.armPoleW).normalize();
+    return p;
+  };
+  const armL = ik2(shL, gripL, BONE.upper_arm, BONE.forearm, elbowPole(shL, gripL, +1, S.armPoleL));
+  const armR = ik2(shR, gripR, BONE.upper_arm, BONE.forearm, elbowPole(shR, gripR, -1, S.armPoleR));
   const el = S.batEl * D2R, az = S.batAz * D2R;
   const batDir = new THREE.Vector3(Math.sin(el) * Math.sin(az), -Math.cos(el), Math.sin(el) * Math.cos(az)).normalize();
   /* The legs get their own twist reference rather than the hip axis. A batsman
@@ -3935,12 +4017,16 @@ function batterRunup(d, r) {
   applyGuard(d, 0);
   poseFigure(batter, walk(SEG_RUN, K, clamp(r, 0, 1)));
 }
+function segsFor(d) { return d.shot ? (d.forward ? (d._drive ? SEG_DRIVE : SEG_SHOT) : SEG_BACK) : (d._padaway ? SEG_PAD : SEG_LEAVE); }
+function bankFor(d) {
+  if (d.shot) return Object.assign({}, K, ensureDyn(d));
+  if (d._padaway) return Object.assign({}, K, padawayPoses(d));
+  return K;
+}
 function batterPose(d, p) {
-  const dyn = ensureDyn(d);
   batter.group.visible = true;
   applyGuard(d, smooth(clamp((p - 0.34) / 0.66, 0, 1)));
-  const bank = d.shot ? Object.assign({}, K, dyn) : K;
-  poseFigure(batter, walk(d.shot ? SEG_SHOT : SEG_LEAVE, bank, clamp(p, 0, 1.95)));
+  poseFigure(batter, walk(segsFor(d), bankFor(d), clamp(p, 0, 1.95)));
 }
 function stance() {
   batter.group.visible = true;
@@ -3953,8 +4039,8 @@ function stance() {
    than bend the ball, we shift the whole batsman sideways by the shortfall —
    a few centimetres, invisible, and it guarantees the two meet. */
 function contactPose(d) {
-  const dyn = dynamicPoses(d);
-  return d.shot ? dyn.contact : K.raised;
+  if (d.shot) return dynamicPoses(d).contact;
+  return d._padaway ? padawayPoses(d).padaway : K.raised;
 }
 function padOffsetFor(d) {
   const J = solveSkeleton(contactPose(d));
@@ -3990,6 +4076,12 @@ function padContactPoint(d) {
    footwork instead of showing up as a strange starting position. */
 function placeBatter(d) {
   dynCache = null;
+  /* Shouldering arms to a ball that is going to hit him in front of the
+     crease is a pad-away: the pad goes at the ball, the bat goes up. To a
+     ball that strikes him on the crease or behind it he simply leaves. */
+  d._padaway = !d.shot && (d.iz - GROUP_Z) > 0.15 && Math.abs(d.ix) < 0.45;
+  /* A full ball he plays forward to is driven at, not blocked. */
+  d._drive = !!(d.shot && d.forward && d.lenKind === 'FULL');
   const o = padOffsetFor(d);
   d._guard = { x: clamp(o.x, -0.045, 0.045), z: clamp(o.z, -0.04, 0.04) };
   d._drift = { x: o.x - d._guard.x, z: o.z - d._guard.z };
@@ -4107,6 +4199,8 @@ function showModelWarning() {
    ?seed= overrides are played for fun and never posted.
    ============================================================ */
 
+const ICC_FULL = [["ENG", "England"], ["AUS", "Australia"], ["IND", "India"], ["PAK", "Pakistan"], ["NZL", "New Zealand"], ["RSA", "South Africa"], ["WIN", "West Indies"], ["SRL", "Sri Lanka"], ["BAN", "Bangladesh"], ["AFG", "Afghanistan"], ["IRE", "Ireland"], ["ZIM", "Zimbabwe"]];
+const ICC_ASSOC = [["ARG", "Argentina"], ["AUT", "Austria"], ["BAH", "Bahamas"], ["BHR", "Bahrain"], ["BEL", "Belgium"], ["BLZ", "Belize"], ["BER", "Bermuda"], ["BHU", "Bhutan"], ["BOT", "Botswana"], ["BRA", "Brazil"], ["BUL", "Bulgaria"], ["CAM", "Cambodia"], ["CMR", "Cameroon"], ["CAN", "Canada"], ["CAY", "Cayman Islands"], ["CHI", "Chile"], ["CHN", "China"], ["COK", "Cook Islands"], ["CRC", "Costa Rica"], ["CRO", "Croatia"], ["CYP", "Cyprus"], ["CZE", "Czech Republic"], ["CIV", "Côte d'Ivoire"], ["DEN", "Denmark"], ["EST", "Estonia"], ["SWZ", "Eswatini"], ["FLK", "Falkland Islands"], ["FIJ", "Fiji"], ["FIN", "Finland"], ["FRA", "France"], ["GAM", "Gambia"], ["GER", "Germany"], ["GHA", "Ghana"], ["GIB", "Gibraltar"], ["GRE", "Greece"], ["GSY", "Guernsey"], ["HKG", "Hong Kong"], ["HUN", "Hungary"], ["INA", "Indonesia"], ["IRN", "Iran"], ["IOM", "Isle of Man"], ["ISR", "Israel"], ["ITA", "Italy"], ["JPN", "Japan"], ["JER", "Jersey"], ["KEN", "Kenya"], ["KUW", "Kuwait"], ["LES", "Lesotho"], ["LUX", "Luxembourg"], ["MWI", "Malawi"], ["MAS", "Malaysia"], ["MDV", "Maldives"], ["MLI", "Mali"], ["MLT", "Malta"], ["MEX", "Mexico"], ["MNG", "Mongolia"], ["MOZ", "Mozambique"], ["MYA", "Myanmar"], ["NAM", "Namibia"], ["NEP", "Nepal"], ["NED", "Netherlands"], ["NGA", "Nigeria"], ["NOR", "Norway"], ["OMA", "Oman"], ["PAN", "Panama"], ["PNG", "Papua New Guinea"], ["PER", "Peru"], ["PHI", "Philippines"], ["POR", "Portugal"], ["QAT", "Qatar"], ["ROU", "Romania"], ["RWA", "Rwanda"], ["SAM", "Samoa"], ["KSA", "Saudi Arabia"], ["SCO", "Scotland"], ["SRB", "Serbia"], ["SEY", "Seychelles"], ["SLE", "Sierra Leone"], ["SGP", "Singapore"], ["SVN", "Slovenia"], ["KOR", "South Korea"], ["ESP", "Spain"], ["SHN", "St Helena"], ["SUR", "Suriname"], ["SWE", "Sweden"], ["SUI", "Switzerland"], ["TJK", "Tajikistan"], ["TAN", "Tanzania"], ["THA", "Thailand"], ["TUR", "Turkey"], ["TCA", "Turks & Caicos"], ["UGA", "Uganda"], ["UAE", "United Arab Emirates"], ["USA", "United States"], ["UZB", "Uzbekistan"], ["VAN", "Vanuatu"]];
 const LB = {
   cfg: (typeof window !== 'undefined' && window.OO_CONFIG) || null,
   client: null, user: null, name: null,
@@ -4175,9 +4269,10 @@ async function lbSetUser(user) {
     const m = user.user_metadata || {};
     const fallback = (m.full_name || m.name || (user.email || 'Umpire').split('@')[0]).trim().slice(0, 24);
     try {
-      const { data } = await LB.client.from('profiles').select('name').eq('id', user.id).maybeSingle();
-      if (data && data.name) LB.name = data.name;
+      const { data } = await lbProfileRead(user.id);
+      if (data && data.name) { LB.name = data.name; LB.nation = data.nation || null; LB.newHere = !data.nation; }
       else {
+        LB.newHere = true;
         /* The database refuses names that fail the word filter. A Google name
            that trips it gets a neutral one instead of no profile at all. */
         let { error } = await LB.client.from('profiles').upsert({ id: user.id, name: fallback });
@@ -4211,19 +4306,42 @@ async function lbSignOut() {
   if (LB.client) await LB.client.auth.signOut();
   await lbSetUser(null);
 }
-async function lbRename(name) {
+/* The profile has a `nation` column once Pat has added it; until then we read
+   and write the name alone and the team picker says it cannot save yet. */
+LB.natCol = null;   // unknown until the first read
+async function lbProfileRead(id) {
+  if (LB.natCol !== false) {
+    const r = await LB.client.from('profiles').select('name,nation').eq('id', id).maybeSingle();
+    if (!r.error) { LB.natCol = true; return r; }
+    if (r.error.code !== '42703') return r;
+    LB.natCol = false;
+  }
+  return LB.client.from('profiles').select('name').eq('id', id).maybeSingle();
+}
+async function lbSaveCard(name, nation) {
   name = (name || '').trim().slice(0, 24);
   if (!name || !LB.user) return;
-  const { error } = await LB.client.from('profiles').update({ name }).eq('id', LB.user.id);
+  const row = { name };
+  if (LB.natCol && nation !== undefined) row.nation = nation || null;
+  const { error } = await LB.client.from('profiles').update(row).eq('id', LB.user.id);
   if (error) {
-    const el = E('bSession');
     const note = document.createElement('div');
-    note.className = 'bNote'; note.textContent = "That name isn't allowed on the board. Try another.";
-    el.appendChild(note);
+    note.className = 'bNote'; note.textContent = error.code === '23514' ? "That name isn't allowed on the board. Try another." : 'Could not save — try again.';
+    E('bCard').appendChild(note);
     return;
   }
-  LB.name = name;
+  LB.name = name; if (LB.natCol && nation !== undefined) LB.nation = nation || null;
+  LB.newHere = false; LB.editing = false;
   lbPaintAuth();
+  lbPaintBoard();
+}
+function lbRename(name) { return lbSaveCard(name, undefined); }
+const natPill = code => code ? '<span class="nat">' + esc(code) + '</span>' : '';
+function lbTeamOptions(sel) {
+  const opt = (c, n) => '<option value="' + c + '"' + (c === sel ? ' selected' : '') + '>' + esc(n) + ' (' + c + ')</option>';
+  return '<option value=""' + (!sel ? ' selected' : '') + '>— no team —</option>'
+    + '<optgroup label="Full members">' + ICC_FULL.map(([c, n]) => opt(c, n)).join('') + '</optgroup>'
+    + '<optgroup label="Associate members">' + ICC_ASSOC.map(([c, n]) => opt(c, n)).join('') + '</optgroup>';
 }
 
 /* ---------- posting ---------- */
@@ -4246,19 +4364,19 @@ async function lbFetch(mode) {
   if (!LB.client) return [];
   if (mode === 'today') {
     const { data } = await LB.client.from('scores')
-      .select('score,grid,created_at,user_id,profiles(name)')
+      .select('score,grid,created_at,user_id,profiles(name' + (LB.natCol ? ',nation' : '') + ')')
       .eq('day', lbDay()).order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
-    return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', score: r.score, grid: r.grid, overs: 1 }));
+    return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, score: r.score, grid: r.grid, overs: 1 }));
   }
   // last 30 days: total correct decisions, then average
   const since = new Date(Date.now() - 30 * 864e5);
   const p = n => (n < 10 ? '0' : '') + n;
   const sinceKey = since.getFullYear() + '-' + p(since.getMonth() + 1) + '-' + p(since.getDate());
   const { data } = await LB.client.from('scores')
-    .select('score,user_id,profiles(name)').gte('day', sinceKey).limit(5000);
+    .select('score,user_id,profiles(name' + (LB.natCol ? ',nation' : '') + ')').gte('day', sinceKey).limit(5000);
   const tot = {};
   for (const r of (data || [])) {
-    const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', score: 0, overs: 0 });
+    const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, score: 0, overs: 0 });
     t.score += r.score; t.overs++;
   }
   return Object.values(tot).sort((a, b) => b.score - a.score || a.overs - b.overs);
@@ -4292,7 +4410,7 @@ async function lbPaintBoard() {
     const right = lbMode === 'today'
       ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + r.score + '/6</b>'
       : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + r.score + '</b>';
-    return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bName">' + esc(r.name) + '</span>' + right + '</div>';
+    return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bName">' + natPill(r.nation) + esc(r.name) + '</span>' + right + '</div>';
   }).join('');
   if (LB.user) {
     me.textContent = myIdx < 0
@@ -4311,15 +4429,36 @@ function lbPaintAuth() {
   else { who.textContent = 'SIGN IN'; who.onclick = lbSignIn; }
   const s = E('bSession');
   if (!lbEnabled()) s.innerHTML = '';
-  else if (LB.user) s.innerHTML = 'Playing as <b id="bName">' + esc(LB.name || '') + '</b> · <a id="bRename">change name</a> · <a id="bOut">sign out</a>';
-  else s.innerHTML = '<button class="wide" id="bIn">Sign in with Google</button><div class="bNote">One tap. Your name goes on the board, nothing else.</div>';
+  else if (LB.user) {
+    /* A newly signed-in player is asked for a name and a team straight away;
+       everyone else sees their card with an obvious Edit button. */
+    if (LB.newHere && !LB.editing && LB.natCol) LB.editing = true;
+    if (LB.editing) {
+      s.innerHTML = '<div id="bCard">'
+        + '<label for="bNameIn">Your name on the board</label>'
+        + '<input id="bNameIn" maxlength="24" autocomplete="nickname" placeholder="e.g. Dickie Bird">'
+        + '<label for="bTeamIn">Your team</label>'
+        + '<select id="bTeamIn"' + (LB.natCol ? '' : ' disabled') + '>' + lbTeamOptions(LB.nation) + '</select>'
+        + (LB.natCol ? '' : '<div class="bNote">Team picking switches on shortly.</div>')
+        + '<button class="wide cSave" id="bSave">Save</button>'
+        + '<button class="ghost cCancel" id="bCancel">Cancel</button>'
+        + '</div><div class="bNote"><a id="bOut">Sign out</a></div>';
+      E('bNameIn').value = LB.name || '';
+      E('bSave').onclick = () => lbSaveCard(E('bNameIn').value, LB.natCol ? E('bTeamIn').value : undefined);
+      E('bCancel').onclick = () => { LB.editing = false; LB.newHere = false; lbPaintAuth(); };
+      if (LB.newHere) setTimeout(() => { const i = E('bNameIn'); if (i) { i.focus(); i.select(); } }, 50);
+    } else {
+      s.innerHTML = '<div id="bCard"><div class="cRow">'
+        + (LB.nation ? natPill(LB.nation) : '<span class="nat none">—</span>')
+        + '<span class="cName">' + esc(LB.name || '') + '</span>'
+        + '<button class="ghost cBtn" id="bEdit">Edit name &amp; team</button></div></div>'
+        + '<div class="bNote"><a id="bOut">Sign out</a></div>';
+      E('bEdit').onclick = () => { LB.editing = true; lbPaintAuth(); };
+    }
+  }
+  else s.innerHTML = '<button class="wide" id="bIn">Sign in with Google</button><div class="bNote">One tap. Pick a name and your team, and your score goes on the board — nothing else.</div>';
   if (E('bIn')) E('bIn').onclick = lbSignIn;
   if (E('bOut')) E('bOut').onclick = lbSignOut;
-  if (E('bRename')) E('bRename').onclick = () => {
-    s.innerHTML = '<input id="bNameIn" maxlength="24" placeholder="Your name on the board"> <button class="ghost" id="bSave" style="width:auto;padding:8px 12px">Save</button>';
-    E('bNameIn').value = LB.name || '';
-    E('bSave').onclick = () => lbRename(E('bNameIn').value);
-  };
 }
 
 /* Called from the end-of-over screen. Decides what the summary says about
@@ -4704,7 +4843,7 @@ function makeScene() {
   // this it strobes rather than flies
   trail = new THREE.Line(
     new THREE.BufferGeometry(),
-    new THREE.LineBasicMaterial({ color: 0xffa294, transparent: true, opacity: 0.5 })
+    new THREE.LineBasicMaterial({ color: 0xffa294, transparent: true, opacity: 0.0 })
   );
   trail.frustumCulled = false;
   trail.visible = false;
@@ -4916,6 +5055,8 @@ const LENGTHS = {
 };
 const LEN_NAME = { YORKER: 'YORKER', FULL: 'FULL', GOOD: 'GOOD LENGTH', SHORT: 'SHORT' };
 const LEN_PICK = { spin: ['GOOD', 'GOOD', 'FULL', 'SHORT'], pace: ['GOOD', 'GOOD', 'FULL', 'SHORT', 'SHORT', 'YORKER'] };
+const LEN_PICK_V = { spin: ['GOOD', 'GOOD', 'FULL', 'FULL', 'SHORT'], pace: ['GOOD', 'GOOD', 'FULL', 'FULL', 'SHORT', 'YORKER'] };
+const lenPick = () => varietyOn() ? LEN_PICK_V : LEN_PICK;
 /* Mean commitment by length, and how far in front of his stumps he can be
    struck at the two extremes of it. A good length is deliberately a coin flip. */
 const COMMIT = { FULL: 0.74, GOOD: 0.45, SHORT: 0.24 };
@@ -4927,7 +5068,9 @@ const REACH  = { FULL: [0.74, 2.06], GOOD: [0.42, 1.98], SHORT: [0.34, 1.34] };
    less, a hard bouncy one more. */
 const REST = { low: [0.36, 0.47], normal: [0.51, 0.63], steep: [0.70, 0.86] };
 
-function makeDelivery(B, forceLen) {
+const SHOT_LEG_IX = 0.06, SHOT_OFF_IX = -0.10;   // leg stump and outside; off stump and outside
+function varietyOn() { return SEED_KEY > '2026-09-19' || practice; }
+function makeDelivery(B, forceLen, big) {
   const type = B.style;
   const relY = REL_Y + rnd(-0.12, 0.10);
   const mph = type === 'fast' ? Math.round(rnd(86, 97))
@@ -4937,17 +5080,20 @@ function makeDelivery(B, forceLen) {
 
   // a spinner drops it into the rough on purpose about a quarter of the time
   const aimRough = type === 'spin' && rng() < 0.28;
-  const lenKind = aimRough ? 'GOOD' : (forceLen || pick(LEN_PICK[type === 'spin' ? 'spin' : 'pace']));
+  const lenKind = aimRough ? 'GOOD' : (forceLen || pick(lenPick()[type === 'spin' ? 'spin' : 'pace']));
   const pz = aimRough ? rnd(ROUGH.z0 + 0.3, ROUGH.z1 - 0.3) : rnd(...LENGTHS[lenKind]);
 
   /* Where it pitches across the strip. A bowler going round the wicket is
      starting from the other side and naturally lands straighter or leg-side,
      which is where most "pitched outside leg" reprieves come from. */
   const bias = B.around ? (B.hand === 'right' ? 0.110 : -0.085) : 0;
+  const spice = varietyOn();
   const px = aimRough ? rnd(ROUGH.x0 + 0.05, ROUGH.x1 - 0.05)
-    : rng() < 0.12
+    : rng() < (spice ? 0.20 : 0.12)
       ? rnd(0.06, 0.34)                                  // a deliberate leg-side line
-      : clamp(-0.06 + bias + gauss() * 0.105, -0.50, 0.34);
+      : (spice && rng() < 0.18)
+        ? rnd(-0.55, -0.20)                              // outside off, asking him to drive
+        : clamp(-0.06 + bias + gauss() * (spice ? 0.14 : 0.105), -0.55, 0.34);
 
   /* Deviation off the pitch. A spinner turns his own way most of the time, with
      the occasional one that holds its line or goes the other way; a seamer just
@@ -4967,14 +5113,16 @@ function makeDelivery(B, forceLen) {
   const offCrack = nearCrack(px, pz);
   let dev = type === 'spin'
     ? (straightOn ? gauss() * 0.06
-                  : B.turnSgn * (rng() < 0.30 ? rnd(0.48, 1.00) : rnd(0.16, 0.46)))
-    : (rng() < 0.20 ? B.swingSgn * rnd(0.20, 0.46) : gauss() * 0.085);
+                  : B.turnSgn * (rng() < (spice ? 0.42 : 0.30) ? rnd(0.48, spice ? 1.15 : 1.00) : rnd(0.16, 0.46)))
+    : (rng() < (spice ? 0.28 : 0.20) ? B.swingSgn * rnd(0.20, spice ? 0.52 : 0.46) : gauss() * 0.085);
   if (inRough) dev *= type === 'spin' ? rnd(1.5, 2.2) : rnd(1.2, 1.6);
+  if (big && type === 'spin') dev = B.turnSgn * rnd(0.95, 1.45) * (inRough ? 1.15 : 1);   // the ripper
 
   /* Swing through the air. This is the shape of the flight, not the landing
      point: the ball leaves on one line and arrives on another. */
-  const swing = type === 'spin' ? rnd(-0.10, 0.10)
-              : B.swingSgn * (rng() < 0.42 ? rnd(0.58, 1.20) : rnd(0.08, 0.46));
+  let swing = type === 'spin' ? rnd(-0.10, 0.10)
+              : B.swingSgn * (rng() < (spice ? 0.52 : 0.42) ? rnd(0.58, spice ? 1.45 : 1.20) : rnd(0.08, 0.46));
+  if (big && type !== 'spin') { swing = B.swingSgn * rnd(1.25, 1.75); if (Math.abs(dev) < 0.18) dev = B.swingSgn * rnd(0.18, 0.36); }   // the hooper
 
   // does he play at it? leaving is rarer than playing
   const shot = rng() < 0.82;
@@ -4998,7 +5146,7 @@ function makeDelivery(B, forceLen) {
     forward = true; commit = 0.86;
     iz = clamp(pz * 0.55, 0.12, 0.70);
   } else {
-    commit = clamp(COMMIT[lenKind] + gauss() * 0.30, 0.02, 0.98);
+    commit = clamp(COMMIT[lenKind] + gauss() * 0.30 + (spice && px < -0.20 && lenKind !== 'SHORT' ? 0.22 : 0), 0.02, 0.98);
     const lo = REACH[lenKind][0], hi = REACH[lenKind][1];
     iz = clamp(lo + commit * (hi - lo), lo, Math.min(hi, pz - 0.55));
     forward = iz > 1.12;
@@ -5178,8 +5326,16 @@ const OUT_BY_LEN = { YORKER: 0.55, FULL: 0.55, GOOD: 0.48, SHORT: 0.32 };
 function buildOver(B) {
   const balls = [], recent = [];
   let yorkers = 0, cracks = 0;
+  const VARIETY = SEED_KEY > '2026-09-19' || practice;
+  const kinds = { F: 0, B: 0, L: 0 };
+  const kindOf = d => d.shot ? (d.forward ? 'F' : 'B') : 'L';
+  const shots = {};
+  // two marquee balls an over: planted to do something big, whatever the verdict turns out to be
+  let marquee = [];
+  if (VARIETY) { const a = 1 + Math.floor(rng() * 5); let b = 1 + Math.floor(rng() * 5); if (b === a) b = (a % 5) + 1; marquee = [a, b]; }
+  const shotOf = d => !d.shot ? 'L' : (d.forward ? 'F' : 'B') + (d.ix > SHOT_LEG_IX ? 'leg' : d.ix < SHOT_OFF_IX ? 'off' : d.lenKind === 'FULL' ? 'full' : 'mid');
   for (let n = 0; n < BALLS_PER_OVER; n++) {
-    let len = pick(LEN_PICK[B.style === 'spin' ? 'spin' : 'pace']);
+    let len = pick(lenPick()[B.style === 'spin' ? 'spin' : 'pace']);
     if (len === 'YORKER' && yorkers >= 1) len = pick(['GOOD', 'FULL', 'SHORT']);
     let want = rng() < OUT_BY_LEN[len] ? 'out' : 'notout';
     if (recent.length >= 2 && recent[recent.length - 1] === want && recent[recent.length - 2] === want) {
@@ -5189,16 +5345,20 @@ function buildOver(B) {
     for (let i = 0; i < 400 && !chosen; i++) {
       // hold the length for most of the search; let it go only if that length
       // genuinely cannot give this verdict
-      const d = makeDelivery(B, i < 300 ? len : undefined);
+      const d = makeDelivery(B, i < 300 ? len : undefined, marquee.includes(n));
       if (!d.reachable) continue;
       if (d.offCrack && cracks >= 2 && i < 380) continue;   // two off the cracks in an over is plenty
+      if (VARIETY && i < 350 && kinds[kindOf(d)] >= 3) continue;   // six back-foot shots is not an over
+      if (VARIETY && i < 330 && (shots[shotOf(d)] || 0) >= 2) continue;   // and not the same shot three times
       if (!fallback) fallback = d;
       if (d.truth === want) chosen = d;
     }
-    if (!chosen && !fallback) fallback = makeDelivery(B);
+    if (!chosen && !fallback) fallback = makeDelivery(B, undefined, marquee.includes(n));
     chosen = chosen || fallback;
     if (chosen.lenKind === 'YORKER') yorkers++;
     if (chosen.offCrack) cracks++;
+    kinds[kindOf(chosen)]++;
+    shots[shotOf(chosen)] = (shots[shotOf(chosen)] || 0) + 1;
     chosen.n = n + 1;
     balls.push(chosen);
     recent.push(chosen.truth);
@@ -5411,7 +5571,7 @@ function clearTrack() {
   for (const m of marks) { scene.remove(m); if (m.geometry) m.geometry.dispose(); }
   marks = [];
   trackLine = predLine = null;
-  for (const s of stumpsNear.parts) s.material.color.set(0xefe6cf);
+  for (const s of stumpsNear.parts) s.material.color.set(s.userData.base || 0xefe6cf);
 }
 
 /* A THREE.Line is one pixel wide on almost every browser no matter what you
@@ -5610,4 +5770,1066 @@ addEventListener('keydown', e => {
   }
 });
 requestAnimationFrame(frame);
+</script>
+<script>
+/* ============================================================
+   SHOT SELECTION — the right shot to the right ball (v2, measured)
+
+   Pat: "he plays the wrong shot to the wrong ball… a ball outside leg stump
+   and he shuffles across to play a back-foot defensive." The line decides the
+   shot before the length does. Every ball still ends on the pad (it is an LBW
+   game), so each shot is the MISSED version of itself.
+
+   v2: the pull, flick, back-foot punch and cover drive are now built from
+   pose-estimation over the SIKANA clips (pull Wv1aSL_ODlo 27.5–30.4 s, flick
+   3c_0A_-2_t0 23.3–26 s, back-foot punch IdVdXDr93-M 21–24 s and 27.4–30.6 s,
+   cover drive fELk4k1pndg 47.4–49.5 s), and every back-foot shot has real
+   footwork: the back foot lifts and goes back and across FIRST, then the front
+   foot lifts and follows — no more sliding.
+
+   Figure frame: +Z bowler, +X leg side; batAz 0 = toe toward the bowler,
+   90 = leg, 180 = keeper, 270 = off; batEl 0 = toe down, 90 horizontal,
+   180 toe straight up. hipYaw 88 = side-on, toward 0 = chest to the bowler,
+   negative = chest to the leg side. Az values beyond 360 are deliberate:
+   mixK lerps numbers, so 290 → 395 → 470 swings the bat the right way round.
+   ============================================================ */
+
+function pickShot(d) {
+  if (!d.shot) return d._padaway ? 'padaway' : 'leave';
+  // leg stump and outside is a flick/pull/glance ball; off stump and outside is a cover/punch ball
+  const LEG = typeof SHOT_LEG_IX === 'number' ? SHOT_LEG_IX : 0.08, OFF = typeof SHOT_OFF_IX === 'number' ? SHOT_OFF_IX : -0.15;
+  const leg = d.ix > LEG, off = d.ix < OFF, len = d.lenKind;
+  // a little of the batsman's own mind: the same ball is not always met the same way (fixed per ball, so replays agree)
+  const r = (Math.sin(d.px * 127.1 + d.pz * 311.7 + d.ix * 74.7) * 43758.5453) % 1, u = r < 0 ? r + 1 : r;
+  if (d.forward) {
+    if (leg) return 'flick';
+    if (off && len !== 'YORKER') return 'cover';
+    if (len === 'FULL') return 'drive';
+    if (len === 'GOOD' && u < 0.35) return 'drive';          // drives one on the up
+    return 'fdef';
+  }
+  if (leg) return len === 'SHORT' ? 'pull' : (u < 0.30 && len !== 'FULL' ? 'pull' : 'glance');
+  if (off) return 'punch';
+  if (len === 'SHORT' && u < 0.30) return 'pull';            // short and straight: has a go
+  if (len !== 'SHORT' && u < 0.28) return 'punch';           // back-foot drive down the ground
+  return 'bdef';
+}
+
+const A_ = (T, ...o) => Object.assign({}, T, ...o);
+
+/* ---------- hands from the shoulders, not from the air ----------
+   Every measured shot keeps the hands within about 0.8 of a straight arm of
+   the shoulders (pull contact 0.63–0.88, punch 0.6–0.9, flick 0.76–0.87, cover
+   0.45–0.84). When a key gives `hand` — the mid-point of the two wrists
+   RELATIVE to the shoulder centre, figure frame — the grip is placed from the
+   solved shoulders and pulled in so neither arm is straighter than `ext`
+   (default 0.86). That is what stops the wooden locked-elbow look. */
+function resolveHands(S) {
+  if (!S.hand) return S;
+  const J = solveSkeleton(A_(S, { grip: S.grip || [0, 1, 0] }));
+  let g = new THREE.Vector3(J.shC.x + S.hand[0], J.shC.y + S.hand[1], J.shC.z + S.hand[2]);
+  const maxR = (S.ext === undefined ? 0.86 : S.ext) * (BONE.upper_arm + BONE.forearm);
+  for (let it = 0; it < 3; it++) {
+    for (const sh of [J.shL, J.shR]) {
+      const dv = g.clone().sub(sh), r = dv.length();
+      if (r > maxR) g = sh.clone().addScaledVector(dv, maxR / r);
+    }
+  }
+  return A_(S, { grip: [g.x, g.y, g.z] });
+}
+
+
+/* ---------- front-foot leg-side: the flick / clip off the legs ----------
+   Measured (flick-end, near bowler's end): at contact the hands are LOW, 0.76–
+   0.86 m, by the front hip and on the off side of the body, hips only slightly
+   open (71–77), head down at 1.30 m. The hands never go to the leg side — the
+   wrists do the work. Pat wants it to stop just after the bat passes the pad. */
+const FLICK = (() => {
+  const c = FWD.contact, h = FWD.hold;
+  const arms = { armPoleL: [-0.15, -0.35, 0.92], armPoleR: [0.7, -0.35, -0.6], armPoleW: 0.85 };
+  return {
+    // measured: wrists 0.40 below the shoulder centre, level with it — the bat is late, still coming
+    contact: A_(c, arms, { hipYaw: 68, shYaw: 0, tilt: 14, side: -16, headUp: 0.05,
+      hand: [-0.05, -0.40, -0.06], ext: 0.80, batEl: 40, batAz: 165 }),
+    // just past the pad: wrists roll, toe comes up toward mid-wicket (measured 0.44 below, 0.07 ahead)
+    through: A_(c, arms, { hipYaw: 60, shYaw: -6, tilt: 16, side: -14, headUp: 0.06,
+      pelvis: [c.pelvis[0] + 0.01, c.pelvis[1] - 0.01, c.pelvis[2] + 0.03],
+      hand: [0.08, -0.36, 0.22], ext: 0.90, batEl: 100, batAz: 96,
+      armPoleL: [0.1, -0.2, 0.97], armPoleR: [0.75, -0.1, -0.65] }),
+    follow: A_(h, arms, { hipYaw: 54, shYaw: -8, tilt: 16, side: -12, headUp: 0.10,
+      pelvis: [h.pelvis[0] + 0.02, h.pelvis[1] - 0.01, h.pelvis[2] + 0.04],
+      backFoot: [h.backFoot[0], 0.15, h.backFoot[2] + 0.02],
+      hand: [0.18, -0.24, 0.28], ext: 0.92, batEl: 128, batAz: 106,
+      armPoleL: [0.2, 0.0, 0.98], armPoleR: [0.75, 0.0, -0.66] })
+  };
+})();
+
+/* ---------- front-foot outside off: the cover drive ----------
+   Measured (cover-end2): front foot goes half a metre to the off and 0.8 m
+   down the pitch, the body stays side-on (hips 70–75) and gets low over the
+   front knee (head 1.21–1.30 m), hands finish high in front (1.35 m). */
+const COVER = (() => {
+  const c = DRV.contact, h = DRV.check;
+  const arms = { armPoleL: [-0.45, 0.35, 0.82], armPoleR: [0.6, -0.6, -0.5], armPoleW: 0.85 };
+  return {
+    dtop: A_(DRV.dtop, { hand: [-0.33, -0.22, -0.12], ext: 0.90, armPoleL: [-0.2, -0.55, -0.8], armPoleR: [0.5, 0.2, -0.85], armPoleW: 0.8 }),
+    stride1: DRV.stride1, stride2: DRV.stride2,
+    plant: A_(DRV.plant, { grip: [DRV.plant.grip[0] - 0.04, DRV.plant.grip[1], DRV.plant.grip[2]] }),
+    // measured contact: wrists 0.22 off / 0.24 below the shoulder centre, bat still arriving
+    contact: A_(c, arms, { hipYaw: 70, shYaw: 6, tilt: 14, side: -14, headUp: 0.05,
+      pelvis: [c.pelvis[0], c.pelvis[1] - 0.05, c.pelvis[2] + 0.06],
+      hand: [-0.14, -0.27, 0.01], ext: 0.72, batEl: 55, batAz: 195, armPoleL: [-0.3, -0.2, 0.9], armPoleR: [0.7, -0.5, -0.5] }),
+    // through the line toward cover: hands rise to the shoulders, extending (measured 0.12 above, 0.18 ahead)
+    through: A_(c, arms, { hipYaw: 72, shYaw: 4, tilt: 16, side: -10, headUp: 0.05,
+      pelvis: [c.pelvis[0], c.pelvis[1] - 0.06, c.pelvis[2] + 0.08],
+      hand: [-0.28, -0.12, 0.46], ext: 0.90, batEl: 52, batAz: 322 }),
+    up: A_(h, arms, { hipYaw: 70, shYaw: 4, tilt: 16, side: -8, headUp: 0.05,
+      pelvis: [h.pelvis[0], h.pelvis[1] - 0.05, h.pelvis[2] + 0.04],
+      hand: [-0.30, -0.04, 0.50], ext: 0.95, batEl: 92, batAz: 316 }),
+    // checked: hands at shoulder height pointing at cover, head still down over the front knee
+    check: A_(h, arms, { hipYaw: 68, shYaw: 2, tilt: 16, side: -6, headUp: 0.06,
+      pelvis: [h.pelvis[0], h.pelvis[1] - 0.04, h.pelvis[2] + 0.04],
+      hand: [-0.30, 0.02, 0.50], ext: 0.95, batEl: 118, batAz: 312, armPoleL: [-0.5, 0.45, 0.72], armPoleR: [0.6, -0.4, -0.6] })
+  };
+})();
+
+/* ---------- back-foot shots: templates in absolute figure coordinates ----------
+   backFoot: where the back foot lands (it goes there FIRST). backHands: the
+   hands as it lands. contact.frontFoot is a template; the aim replaces it. */
+const BFOOT = {
+  bdef: {
+    backFoot: [-0.28, 0.071, -0.42], backHands: { grip: [-0.36, 1.05, -0.25], batEl: 140, batAz: 236 },
+    contact: BACK.contact, hold: BACK.hold, liftFront: true
+  },
+  /* Punch, measured (punch-end 21–24 s and 27.4–30.6 s): back foot back ~0.3
+     and across, front foot then drawn back to land near it; hands low by the
+     front hip at contact (1.0 m), then the punch extends up and through toward
+     cover to 1.6–1.75 m with the front elbow high; body stays side-on (70)
+     and stands tall (pelvis 0.95, head 1.53 → 1.72). */
+  punch: {
+    backFoot: [-0.30, 0.071, -0.44],
+    // hands at the top: 0.3 off and 0.18 below the shoulders, behind them (measured)
+    backHands: { hand: [-0.30, -0.18, -0.16], ext: 0.80, batEl: 120, batAz: 236, armPoleL: [-0.3, -0.7, -0.6], armPoleR: [0.4, 0.1, -0.9], armPoleW: 0.8 },
+    // contact: hands low by the front hip (0.36 below, 0.32 off), head forward over the ball
+    contact: { pelvis: [-0.14, 0.94, -0.20], hipYaw: 72, shYaw: -6, tilt: 12, side: -18, headUp: 0.20,
+      backFoot: [-0.30, 0.071, -0.44], frontFoot: [-0.16, 0.071, -0.05],
+      hand: [-0.30, -0.32, 0.14], ext: 0.82, batEl: 22, batAz: 322,
+      legPoleL: [-0.2, 0, 0.98], legPoleR: [-0.15, 0, 0.99], armPoleL: [-0.2, 0.2, 0.95], armPoleR: [0.6, -0.7, -0.4], armPoleW: 0.85 },
+    // the punch: hands rise to the shoulders and extend toward cover, front elbow high, head stays down
+    through: { pelvis: [-0.14, 0.96, -0.16], hipYaw: 64, shYaw: -14, tilt: 10, side: -12, headUp: 0.25,
+      backFoot: [-0.30, 0.071, -0.44], frontFoot: [-0.16, 0.071, -0.05],
+      hand: [-0.30, -0.10, 0.50], ext: 0.94, batEl: 58, batAz: 314,
+      legPoleL: [-0.2, 0, 0.98], legPoleR: [-0.15, 0, 0.99], armPoleL: [-0.5, 0.4, 0.75], armPoleR: [0.6, -0.75, -0.2], armPoleW: 0.85 },
+    // checked: hands just above shoulder height, bat pointing up at cover (measured 0.24 above, 0.34 ahead — held back a touch)
+    check: { pelvis: [-0.15, 0.95, -0.14], hipYaw: 56, shYaw: -20, tilt: 8, side: -8, headUp: 0.30,
+      backFoot: [-0.30, 0.071, -0.44], frontFoot: [-0.16, 0.071, -0.05],
+      hand: [-0.30, -0.02, 0.50], ext: 0.95, batEl: 122, batAz: 306,
+      legPoleL: [-0.2, 0, 0.98], legPoleR: [-0.15, 0, 0.99], armPoleL: [-0.5, 0.45, 0.72], armPoleR: [0.6, -0.7, -0.3], armPoleW: 0.85 },
+    liftFront: true
+  },
+  /* Glance: the flick off the back foot — same low hands on the off side of
+     the body, wrists closing the face toward square leg, short finish. */
+  glance: {
+    backFoot: [-0.26, 0.071, -0.40], backHands: { grip: [-0.34, 1.05, -0.25], batEl: 140, batAz: 236 },
+    contact: A_(BACK.contact, { hipYaw: 66, grip: [-0.30, 0.94, -0.04], batEl: 30, batAz: 160,
+      armPoleL: [-0.3, 0.4, 0.85], armPoleR: [0.7, -0.3, -0.5] }),
+    through: A_(BACK.contact, { hipYaw: 56, shYaw: -6, side: -16,
+      grip: [-0.26, 0.96, 0.14], batEl: 62, batAz: 98, armPoleL: [-0.4, 0.4, 0.8], armPoleR: [0.5, -0.1, -0.8] }),
+    follow: A_(BACK.hold, { hipYaw: 50, shYaw: -6, side: -12,
+      grip: [-0.28, 1.04, 0.12], batEl: 74, batAz: 108, armPoleL: [-0.4, 0.4, 0.8], armPoleR: [0.5, -0.1, -0.8] }),
+    liftFront: true
+  },
+  /* Pull, measured (pull-end 27.5–30.4 s, a 3/4 bowler's-end camera): back
+     foot back 0.44 and across 0.43; the hands go up to 1.4 m behind toward
+     slip with the bat horizontal; at contact the hips are SQUARE to the bowler
+     (5°), the hands at chest height (1.32) in front, pelvis tall (0.90), head
+     1.65; then the body pivots on the back foot — hips to −44 and beyond — the
+     front foot swings round behind and the bat finishes over the shoulder
+     toward square leg. Hands stay chest-high throughout. */
+  pull: {
+    backFoot: [-0.45, 0.071, -0.56],
+    // top of the backswing: hands 0.4 to the off of the shoulders, at shoulder height, behind — right elbow up, left folded
+    backHands: { hand: [-0.36, 0.02, -0.16], ext: 0.80, batEl: 112, batAz: 268, armPoleL: [-0.2, -0.75, -0.6], armPoleR: [0.1, 0.6, -0.8], armPoleW: 0.85 },
+    // contact: hips square, hands 0.2 below the shoulders and 0.3 in front, arms bent (measured ext 0.63–0.88)
+    contact: { pelvis: [-0.46, 0.90, -0.19], hipYaw: 8, shYaw: -8, tilt: -4, side: -12, headUp: 0.40,
+      backFoot: [-0.45, 0.071, -0.56], frontFoot: [-0.32, 0.08, 0.09],
+      hand: [0.06, -0.20, 0.30], ext: 0.78, batEl: 92, batAz: 335,
+      legPoleL: [0.1, 0, 0.99], legPoleR: [-0.3, 0, 0.95], armPoleL: [0.1, -0.85, 0.5], armPoleR: [-0.2, -0.85, 0.45], armPoleW: 0.85 },
+    // through: arms extend across the body toward mid-wicket, still chest high
+    through: { pelvis: [-0.48, 0.92, -0.18], hipYaw: 4, shYaw: -14, tilt: -8, side: -14, headUp: 0.42,
+      backFoot: [-0.45, 0.071, -0.56], frontFoot: [-0.32, 0.08, 0.09],
+      hand: [0.22, -0.12, 0.26], ext: 0.86, batEl: 96, batAz: 400,
+      legPoleL: [0.1, 0, 0.99], legPoleR: [-0.3, 0, 0.95], armPoleL: [0.3, -0.8, 0.5], armPoleR: [-0.4, -0.8, 0.4], armPoleW: 0.85 },
+    // finish: the pivot; hands wrapped to the leg side of the shoulders, bat over the shoulder toward square leg
+    finish: { pelvis: [-0.47, 0.90, -0.21], hipYaw: -32, shYaw: -10, tilt: -2, side: -16, headUp: 0.40,
+      backFoot: [-0.45, 0.071, -0.56], frontFoot: [-0.34, 0.08, -0.34],
+      hand: [0.32, -0.16, 0.12], ext: 0.80, batEl: 112, batAz: 470,
+      legPoleL: [-0.3, 0.2, 0.9], legPoleR: [-0.6, 0, 0.8], armPoleL: [0.5, -0.5, -0.7], armPoleR: [-0.6, -0.7, 0.3], armPoleW: 0.85 },
+    hold: { pelvis: [-0.50, 0.88, -0.25], hipYaw: -42, shYaw: -6, tilt: 0, side: -10, headUp: 0.45,
+      backFoot: [-0.45, 0.071, -0.56], frontFoot: [-0.40, 0.071, -0.44],
+      hand: [0.30, -0.26, 0.00], ext: 0.80, batEl: 120, batAz: 480,
+      legPoleL: [-0.5, 0, 0.85], legPoleR: [-0.7, 0, 0.7], armPoleL: [0.4, -0.6, -0.7], armPoleR: [-0.6, -0.7, 0.3], armPoleW: 0.85 },
+    liftFront: false
+  }
+};
+
+/* ---------- timelines, with weight ----------
+   Each segment may carry a fifth entry, the easing: 'in' accelerates (the bat
+   gathering speed into the ball — nothing moves at a constant rate into
+   contact), 'lin' holds that speed through the ball, 'out' decelerates (the
+   checked finish). Without it a shot is a chain of equal smoothsteps, which is
+   what made every stroke look like a man placing the bat rather than hitting
+   with it. `walk` is re-declared below to honour the easing. */
+const EASE = { in: u => Math.pow(u, 2.2), out: u => 1 - Math.pow(1 - u, 2.2), lin: u => u };
+walk = function (segs, bank, p) {
+  for (const [from, to, s0, s1, e] of segs) {
+    if (p >= s0 && p <= s1) { const u = clamp((p - s0) / (s1 - s0), 0, 1); return mixK(bank[from], bank[to], (EASE[e] || smooth)(u)); }
+  }
+  return bank[segs[segs.length - 1][1]];
+};
+const SEG_FDEF   = [['backlift', 'top', 0, 0.18], ['top', 'stride1', 0.18, 0.40],
+                    ['stride1', 'stride2', 0.40, 0.60], ['stride2', 'plant', 0.60, 0.80],
+                    ['plant', 'contact', 0.80, 1, 'in'], ['contact', 'hold', 1, 1.30, 'out'],
+                    ['hold', 'settle', 1.30, 1.95]];
+// the drive: foot down early, the bat comes down late and fast, the finish checks
+const SEG_DRIVE2 = [['backlift', 'dtop', 0, 0.20], ['dtop', 'stride1', 0.20, 0.42],
+                    ['stride1', 'stride2', 0.42, 0.60], ['stride2', 'plant', 0.60, 0.80],
+                    ['plant', 'contact', 0.80, 1, 'in'], ['contact', 'through', 1, 1.08, 'lin'],
+                    ['through', 'up', 1.08, 1.20, 'lin'], ['up', 'check', 1.20, 1.40, 'out'],
+                    ['check', 'check', 1.40, 1.72], ['check', 'settle', 1.72, 1.95]];
+const SEG_FLICK  = [['backlift', 'top', 0, 0.18], ['top', 'stride1', 0.18, 0.40],
+                    ['stride1', 'stride2', 0.40, 0.60], ['stride2', 'plant', 0.60, 0.80],
+                    ['plant', 'contact', 0.80, 1, 'in'], ['contact', 'through', 1, 1.09, 'lin'],
+                    ['through', 'follow', 1.09, 1.26, 'out'], ['follow', 'follow', 1.26, 1.65],
+                    ['follow', 'settle', 1.65, 1.95]];
+// back-foot shots: back foot up and away (lift), planted (back), front foot up (gather), planted at the ball (contact)
+const BF_APPROACH = [['backlift', 'top', 0, 0.18], ['top', 'lift', 0.18, 0.36], ['lift', 'back', 0.36, 0.55],
+                     ['back', 'gather', 0.55, 0.78], ['gather', 'contact', 0.78, 1, 'in']];
+const SEG_BDEF   = BF_APPROACH.concat([['contact', 'hold', 1, 1.30, 'out'], ['hold', 'settle', 1.30, 1.95]]);
+const SEG_PUNCH  = BF_APPROACH.concat([['contact', 'through', 1, 1.10, 'lin'], ['through', 'check', 1.10, 1.30, 'out'],
+                    ['check', 'check', 1.30, 1.65], ['check', 'settle', 1.65, 1.95]]);
+const SEG_GLANCE = BF_APPROACH.concat([['contact', 'through', 1, 1.09, 'lin'], ['through', 'follow', 1.09, 1.26, 'out'],
+                    ['follow', 'follow', 1.26, 1.65], ['follow', 'settle', 1.65, 1.95]]);
+const SEG_PULL   = [['backlift', 'top', 0, 0.18], ['top', 'lift', 0.18, 0.34], ['lift', 'back', 0.34, 0.52],
+                    ['back', 'gather', 0.52, 0.76], ['gather', 'contact', 0.76, 1, 'in'],
+                    ['contact', 'through', 1, 1.08, 'lin'], ['through', 'finish', 1.08, 1.28, 'out'],
+                    ['finish', 'hold', 1.28, 1.65], ['hold', 'settle', 1.65, 1.95]];
+
+function segsFor(d) {
+  switch (d._shotType) {
+    case 'drive': case 'cover': return SEG_DRIVE2;
+    case 'fdef': return SEG_FDEF;
+    case 'flick': return SEG_FLICK;
+    case 'pull': return SEG_PULL;
+    case 'glance': return SEG_GLANCE;
+    case 'punch': return SEG_PUNCH;
+    case 'bdef': return SEG_BDEF;
+    case 'padaway': return SEG_PAD;
+    case 'leave': return SEG_LEAVE;
+    default: return SEG_SHOT;
+  }
+}
+
+/* ---------- the poses, aimed at the ball ---------- */
+const v3lerp = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+
+function dynamicPoses(d) {
+  const fwd = d.forward, shot = d._shotType || pickShot(d);
+  const rawX = d.ix - GROUP_X, rawZ = d.iz - GROUP_Z;
+  const onFrontPad = fwd ? rawZ > 0.0 : true;
+  const lx = onFrontPad ? clamp(rawX, -0.52, 0.29) : -0.14;
+  const lz = onFrontPad ? clamp(rawZ, -0.45, 0.62) : 0.36;
+  const footX = lx - 0.045, footZ = lz + (fwd ? 0.120 : 0.010);
+
+  if (fwd) {
+    const TT = shot === 'cover' ? COVER : shot === 'drive' ? DRV : FWD;
+    const fx = shot === 'flick' ? 0.32 : 0.55;              // less body across to a leg-side ball
+    const aim = (T, F) => aimAt(T, F, fx, 0.65, 0.85, 0.90);
+    const contactT = shot === 'flick' ? FLICK.contact : TT.contact;
+    let F = [footX, ANKLE_H, footZ];
+    if (onFrontPad) {
+      const iy = clamp(d.iy, 0.06, 0.95);
+      for (let it = 0; it < 2; it++) {
+        const J = solveSkeleton(resolveHands(aim(contactT, F)));
+        const leg = frontLegAt(J, iy);
+        F = [clamp(F[0] + (rawX - leg.x), -0.60, 0.34), ANKLE_H, clamp(F[2] + (rawZ - leg.z), 0.05, 0.78)];
+      }
+    }
+    const partial = (T, k) => aim(T, [lerp(T.frontFoot[0], F[0], k), 0, lerp(T.frontFoot[2], F[2], k)]);
+    const stride1 = partial(TT.stride1, 0.35);
+    const stride2 = partial(TT.stride2, 0.75);
+    const plant   = aim(TT.plant, F);
+    const R = T => resolveHands(aim(T, F));
+    if (shot === 'drive' || shot === 'cover') {
+      // the weight keeps going after the ball: pelvis on a few centimetres and a touch lower through the finish
+      const push = (T, dz, dy) => A_(T, { pelvis: [T.pelvis[0], T.pelvis[1] + dy, T.pelvis[2] + dz] });
+      return { dtop: resolveHands(TT.dtop), stride1, stride2, plant, contact: R(TT.contact),
+        through: R(push(TT.through, 0.03, -0.01)), up: R(push(TT.up, 0.05, -0.02)), check: R(push(TT.check, 0.05, -0.02)) };
+    }
+    if (shot === 'flick') {
+      return { stride1, stride2, plant, contact: R(FLICK.contact), through: R(FLICK.through), follow: R(FLICK.follow) };
+    }
+    return { stride1, stride2, plant, contact: aim(FWD.contact, F), hold: aim(FWD.hold, F) };
+  }
+
+  /* Back-foot shots. The back foot goes back and across first (lifted on the
+     way), then the front foot lifts and follows to where the ball is. */
+  const TB = BFOOT[shot] || BFOOT.bdef;
+  const S0 = K.top;                                     // where he is at the top of the backlift
+  const B = TB.backFoot;
+  const bodyK = (shot === 'pull' || shot === 'glance') ? 0.5 : 0.8;   // how much the body follows the front foot across
+  const placeT = (T, F) => {
+    const dx = F[0] - T.frontFoot[0], dz = F[2] - T.frontFoot[2];
+    return A_(T, { frontFoot: [F[0], T.frontFoot[1], F[2]],
+      pelvis: [T.pelvis[0] + dx * bodyK, T.pelvis[1], T.pelvis[2] + dz * 0.5],
+      // absolute grips shift with the body; relative hands (T.hand) follow the shoulders on their own
+      grip: T.grip ? [T.grip[0] + dx * 0.9, T.grip[1], T.grip[2] + dz * 0.6] : undefined });
+  };
+  let F = [footX, ANKLE_H, footZ];
+  {
+    const iy = clamp(d.iy, 0.06, 0.95);
+    for (let it = 0; it < 2; it++) {
+      const J = solveSkeleton(resolveHands(placeT(TB.contact, F)));
+      const leg = frontLegAt(J, iy);
+      F = [clamp(F[0] + (rawX - leg.x), -0.60, 0.34), ANKLE_H, clamp(F[2] + (rawZ - leg.z), -0.55, 0.40)];
+    }
+  }
+  const contact = resolveHands(placeT(TB.contact, F));
+  // the hands at the top of the backswing are relative to the shoulders too: resolve them on the 'back' body
+  const backBody = A_(S0, { backFoot: B, pelvis: v3lerp(S0.pelvis, contact.pelvis, 0.7), hipYaw: lerp(S0.hipYaw, contact.hipYaw, 0.5),
+    shYaw: lerp(S0.shYaw, contact.shYaw, 0.5), tilt: lerp(S0.tilt, contact.tilt, 0.6), side: lerp(S0.side, contact.side, 0.6) });
+  const BH = TB.backHands.hand ? resolveHands(A_(backBody, TB.backHands)) : TB.backHands;
+  const midB = v3lerp(S0.backFoot, B, 0.5);
+  const lift = A_(S0, {
+    backFoot: [midB[0], 0.13, midB[2]], frontFoot: S0.frontFoot,
+    pelvis: v3lerp(S0.pelvis, contact.pelvis, 0.35), hipYaw: lerp(S0.hipYaw, contact.hipYaw, 0.25), shYaw: lerp(S0.shYaw, contact.shYaw, 0.25),
+    tilt: lerp(S0.tilt, contact.tilt, 0.3), side: lerp(S0.side, contact.side, 0.3), headUp: 0.3,
+    grip: v3lerp(S0.grip, BH.grip, 0.5), batEl: lerp(S0.batEl, BH.batEl, 0.5), batAz: lerp(S0.batAz, BH.batAz, 0.5),
+    armPoleL: BH.armPoleL, armPoleR: BH.armPoleR, armPoleW: BH.armPoleW, legPoleR: [-0.15, 0.3, 0.94] });
+  const back = A_(S0, {
+    backFoot: B, frontFoot: S0.frontFoot,
+    pelvis: v3lerp(S0.pelvis, contact.pelvis, 0.7), hipYaw: lerp(S0.hipYaw, contact.hipYaw, 0.5), shYaw: lerp(S0.shYaw, contact.shYaw, 0.5),
+    tilt: lerp(S0.tilt, contact.tilt, 0.6), side: lerp(S0.side, contact.side, 0.6), headUp: 0.35,
+    grip: BH.grip, batEl: BH.batEl, batAz: BH.batAz, armPoleL: BH.armPoleL, armPoleR: BH.armPoleR, armPoleW: BH.armPoleW });
+  const midF = v3lerp(S0.frontFoot, F, 0.5);
+  const gather = A_(contact, {
+    frontFoot: TB.liftFront ? [midF[0], 0.11, midF[2]] : v3lerp(S0.frontFoot, F, 0.6),
+    pelvis: v3lerp(back.pelvis, contact.pelvis, 0.6), hipYaw: lerp(back.hipYaw, contact.hipYaw, 0.6), shYaw: lerp(back.shYaw, contact.shYaw, 0.6),
+    grip: v3lerp(BH.grip, contact.grip, 0.45), batEl: lerp(BH.batEl, contact.batEl, 0.45), batAz: lerp(BH.batAz, contact.batAz, 0.45),
+    legPoleL: TB.liftFront ? [-0.1, 0.35, 0.93] : contact.legPoleL });
+  const out = { lift, back, gather, contact };
+  for (const k of ['hold', 'through', 'check', 'follow', 'finish']) {
+    if (!TB[k]) continue;
+    // the pull's finish and hold move the front foot on purpose (the pivot); everything else keeps it on the ball
+    const keepsOwnFoot = shot === 'pull' && (k === 'finish' || k === 'hold');
+    out[k] = resolveHands(keepsOwnFoot ? A_(TB[k], { pelvis: [TB[k].pelvis[0] + (F[0] - TB.contact.frontFoot[0]) * bodyK, TB[k].pelvis[1], TB[k].pelvis[2]] }) : placeT(TB[k], F));
+  }
+  return out;
+}
+
+function placeBatter(d) {
+  dynCache = null;
+  d._padaway = !d.shot && (d.iz - GROUP_Z) > 0.15 && Math.abs(d.ix) < 0.45;
+  d._shotType = pickShot(d);
+  d._drive = d._shotType === 'drive' || d._shotType === 'cover';
+  const o = padOffsetFor(d);
+  d._guard = { x: clamp(o.x, -0.045, 0.045), z: clamp(o.z, -0.04, 0.04) };
+  d._drift = { x: o.x - d._guard.x, z: o.z - d._guard.z };
+  batter.padOffset = o;
+  applyGuard(d, 0);
+  batterRunup(d, 0);
+}
+</script>
+<script>
+/* ============================================================
+   FLAT FIGURES — the players in a handful of flat tones, the ground as it was
+
+   Modelled on the rotoscoped "guess the batsman" clips: cream whites, one
+   skin tone, no outlines, one soft shadow step so limbs still read against
+   the body. Only the people change; pitch, stadium, stumps, ball and lights
+   are the game's own. Nothing about the game changes — this only swaps
+   materials after the figures exist.
+   ============================================================ */
+const FLAT = {
+  striker:  { skin: 0xbf976a, shirt: 0xeee9dc, trousers: 0xdfdacd, collar: 0xf1ede2, pads: 0xf2efe4, gloves: 0xede8dc, boots: 0xe7e3d6,
+              helmet: 0x2e3a33, grille: 0x4b5851, bat: 0xc7ae7e, handle: 0x2b2a27, dark: 0x2b2a27 },
+  // slips: bare hands (the glove mesh is painted skin)
+  fielder:  { skin: 0xb68c62, shirt: 0xe5e0d3, trousers: 0xd3cec0, collar: 0xe9e5d9, pads: 0xe4dfd0, gloves: 0xb68c62, boots: 0xd7d2c3,
+              helmet: 0x2e3a33, grille: 0x4b5851, bat: 0xc7ae7e, handle: 0x2b2a27, dark: 0x2b2a27, cap: 0x2f4a3a },
+  // keeper: big pale gloves
+  keeper:   { skin: 0xb68c62, shirt: 0xe5e0d3, trousers: 0xd3cec0, collar: 0xe9e5d9, pads: 0xe4dfd0, gloves: 0xefece2, boots: 0xd7d2c3,
+              helmet: 0x2e3a33, grille: 0x4b5851, bat: 0xc7ae7e, handle: 0x2b2a27, dark: 0x2b2a27, cap: 0x2f4a3a },
+  bowler:   { skin: 0xbf9569, shirt: 0xefebdf, trousers: 0xe5e1d4, collar: 0xf2efe6, pads: 0xefebdf, gloves: 0xbf9569, boots: 0xe6e2d6,
+              helmet: 0x2e3a33, grille: 0x4b5851, bat: 0xc7ae7e, handle: 0x2b2a27, dark: 0x2b2a27, cap: 0x2f4a3a }
+};
+
+/* Two-step toon ramp: lit and shade. Under the game's own sun the step would be
+   a hard black-and-white terminator, so the lit texel is held down: the sun
+   adds a little, the sky light does most of the work, and a figure reads as
+   one flat shape with just enough form to tell an arm from a torso. */
+/* Flat colour first, light second: most of the colour is emissive, so the sun
+   and the green-tinted sky light only move it by about a tenth. A two-step
+   toon ramp was tried and the terminator across the chest read as underwear. */
+const FLAT_LIGHT = 0.24;
+function flatMat(color, opts) {
+  const c = new THREE.Color(color);
+  return new THREE.MeshLambertMaterial(Object.assign({
+    color: c.clone().multiplyScalar(FLAT_LIGHT), emissive: c, emissiveIntensity: 0.78
+  }, opts || {}));
+}
+
+let flatDone = new WeakSet();
+function underGroup(o, g) { for (let p = o; p; p = p.parent) if (p === g) return true; return false; }
+
+function flatFigureColour(o, pal) {
+  const n = o.name || '';
+  if (n === 'Human') return pal.skin;
+  if (n === 'base003') return pal.shirt;          // the Whites mesh: first primitive is the shirt,
+  if (n.startsWith('base003')) return pal.trousers; // the second the trousers
+  if (n.startsWith('Pad') || n.startsWith('KneeRoll')) return pal.pads;
+  if (n.startsWith('Glove')) return pal.gloves;
+  if (n.startsWith('Boot')) return pal.boots;
+  if (n.startsWith('Sole') || n.startsWith('Strap')) return pal.dark;
+  if (n === 'Helmet' || n === 'Peak') return pal.helmet;
+  if (n === 'Grille') return pal.grille;
+  if (n === 'BatBlade') return pal.bat;
+  if (n === 'BatHandle') return pal.handle;
+  if (n === 'Collar') return pal.collar;
+  return null;
+}
+
+function flatFigure(fig, pal) {
+  if (!fig || !fig.group) return;
+  fig.group.traverse(o => {
+    if (!(o.isMesh || o.isSkinnedMesh) || flatDone.has(o)) return;
+    const g = o.geometry && o.geometry.type; const m = o.material; if (!m) return;
+    let nm = null;
+    const c = flatFigureColour(o, pal);
+    if (c !== null) nm = flatMat(c);
+    else if (!o.name && g === 'SphereGeometry') nm = flatMat(pal.cap || pal.helmet);       // cap
+    else if (!o.name && g === 'CylinderGeometry') nm = flatMat(pal.cap || pal.helmet);     // cap peak
+    else if (g === 'BoxGeometry') nm = flatMat(pal.shirt);                                  // fallback figure
+    if (nm) { o.material = nm; flatDone.add(o); }
+  });
+}
+
+function applyFlatStyle() {
+  if (typeof batter !== 'undefined') flatFigure(batter, FLAT.striker);
+  if (typeof fielders !== 'undefined') fielders.forEach(f => flatFigure(f, f === keeper ? FLAT.keeper : FLAT.fielder));
+  if (typeof bowlerFig !== 'undefined' && bowlerFig) flatFigure(bowlerFig, FLAT.bowler);
+}
+
+/* Keeping gloves. The model's hands are clenched batting gloves; scaled up
+   they read as boxing gloves, and unadorned slabs read as the BACKS of the
+   hands (Pat). A keeper shows you his palms: fingers down, palms to the bowler.
+   Each hand bone now carries a mitt built that way round — a flat slab with a
+   padded palm panel on the side that faces the batsman, four spread fingers
+   and a thumb on the inside. Bone frame: X across the palm, Y wrist → tips,
+   Z through the palm; which way is "palm" is read off the world at build time
+   (the face toward +Z, the batsman's end). */
+function keeperMitts() {
+  if (typeof keeper === 'undefined' || !keeper || !keeper.ready || keeper._mitts) return;
+  const L = keeper.bones.handL, R = keeper.bones.handR; if (!L || !R) return;
+  const pl = new THREE.Vector3(), pr = new THREE.Vector3(); L.getWorldPosition(pl); R.getWorldPosition(pr);
+  const pal = FLAT.keeper;
+  const skin = () => flatMat(pal.gloves);
+  const padMat = () => flatMat(0xcdc5b3);          // the padded palm face, a shade down from the leather
+  for (const b of [L, R]) {
+    b.scale.setScalar(1);
+    const q = b.getWorldQuaternion(new THREE.Quaternion());
+    const zw = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    const palmSide = zw.z > 0 ? 1 : -1;                     // the face that looks up the pitch
+    const xw = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const other = b === L ? pr : pl, me = b === L ? pl : pr;
+    const inner = Math.sign(other.clone().sub(me).dot(xw)) || 1;   // toward the other glove
+    const g = new THREE.Group();
+    const parts = [];
+    // the hand: a flat rounded slab from the wrist to the base of the fingers
+    const slab = new THREE.Mesh(new THREE.CapsuleGeometry(0.066, 0.075, 4, 12), skin());
+    slab.scale.set(1.0, 1, 0.55); slab.position.set(0, 0.085, 0); parts.push(slab);
+    // padded palm panel on the batsman's side
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.125, 0.012), padMat());
+    pad.position.set(0, 0.09, palmSide * 0.037); parts.push(pad);
+    // four fingers, spread, slightly cupped toward the palm
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * 0.031;
+      const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.0145, 0.075, 3, 8), skin());
+      f.position.set(x, 0.185, palmSide * 0.006);
+      f.rotation.z = -x * 1.6;                                  // splay
+      f.rotation.x = palmSide * 0.22;                            // cupped
+      parts.push(f);
+      const fp = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.07, 0.008), padMat());
+      fp.position.set(x, 0.185, palmSide * 0.017); fp.rotation.z = -x * 1.6; fp.rotation.x = palmSide * 0.22; parts.push(fp);
+    }
+    // thumb on the inside
+    const th = new THREE.Mesh(new THREE.CapsuleGeometry(0.019, 0.055, 3, 8), skin());
+    th.position.set(inner * 0.068, 0.075, palmSide * 0.01); th.rotation.z = -inner * 0.6; parts.push(th);
+    // cuff
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.050, 0.060, 0.07, 14), skin());
+    cuff.position.set(0, 0.0, 0); parts.push(cuff);
+    for (const m of parts) { m.name = 'Mitt'; flatDone.add(m); g.add(m); }
+    b.add(g);
+  }
+  keeper._mitts = true;
+}
+
+/* The mitts go on at the keeper's first posed frame, so "palm" is read off a
+   crouching keeper and not the rig's rest pose. */
+{
+  const _poseField = poseField;
+  poseField = function (fig, t) {
+    _poseField(fig, t);
+    if (fig === keeper && fig.ready && !fig._mitts) keeperMitts();
+  };
+}
+
+/* Figures arrive asynchronously; keep applying until everything has loaded. */
+applyFlatStyle();
+{
+  let n = 0;
+  const iv = setInterval(() => {
+    applyFlatStyle();
+    const ready = batter && batter.ready && (typeof fielders === 'undefined' || fielders.every(f => f.ready))
+      && (typeof bowlerFig === 'undefined' || !bowlerFig || bowlerFig.ready);
+    if (ready || ++n > 40) { applyFlatStyle(); clearInterval(iv); }
+  }, 250);
+}
+</script>
+<script>
+/* ============================================================
+   POLISH — refinement pass on the ground, the ball and the stumps
+
+   Nothing here changes a delivery or a verdict. The pitch is redrawn from the
+   SAME crack and rough data the ball reacts to (CRACKS, ROUGH), so what you
+   see is still what the ball hit. Colours are pulled back a touch across the
+   board: a day-five strip is pale, dusty and cracked in fine lines, not
+   blotched and gouged.
+   ============================================================ */
+
+// filmic tone mapping was tried and made the picture milky; off unless asked for
+const POLISH_TONEMAP = /tone/.test(location.search);
+
+/* ---------- the strip, day five ---------- */
+function pitchTextureV2() {
+  const prng = mulberry32(hashStr('pitch2:' + SEED_KEY));
+  return canvasTex(640, 2560, (g, w, h) => {
+    const ux = x => ((x + PITCH_W / 2) / PITCH_W) * w;
+    const vy = z => (1 - (22.12 - z) / (PITCH_LEN + 4)) * h;
+    const PX = w / PITCH_W;                              // pixels per metre
+
+    // base: pale straw, a shade cooler and greyer than before
+    g.fillStyle = '#b9a37c'; g.fillRect(0, 0, w, h);
+
+    // very soft large-scale tonal drift so it is not one flat card
+    for (let i = 0; i < 160; i++) {
+      const r = 40 + prng() * 200;
+      const k = prng();
+      g.fillStyle = k < 0.5 ? 'rgba(168,148,110,0.13)' : 'rgba(206,190,154,0.13)';
+      g.beginPath(); g.arc(prng() * w, prng() * h, r, 0, 7); g.fill();
+    }
+
+    // grass that survives beyond the creases and along the edges — a green tinge
+    // fading in over the last two metres at each end and the outer 30 cm
+    const ends = g.createLinearGradient(0, 0, 0, h);
+    ends.addColorStop(0, 'rgba(112,134,78,0.34)'); ends.addColorStop(0.10, 'rgba(112,134,78,0.0)');
+    ends.addColorStop(0.90, 'rgba(112,134,78,0.0)'); ends.addColorStop(1, 'rgba(112,134,78,0.34)');
+    g.fillStyle = ends; g.fillRect(0, 0, w, h);
+    const sides = g.createLinearGradient(0, 0, w, 0);
+    sides.addColorStop(0, 'rgba(112,134,78,0.30)'); sides.addColorStop(0.09, 'rgba(112,134,78,0)');
+    sides.addColorStop(0.91, 'rgba(112,134,78,0)'); sides.addColorStop(1, 'rgba(112,134,78,0.30)');
+    g.fillStyle = sides; g.fillRect(0, 0, w, h);
+
+    // the worn band down the middle — broad and gentle
+    g.save(); g.translate(w / 2, h / 2); g.scale(1, (h * 0.36) / (w * 0.5));
+    const band = g.createRadialGradient(0, 0, 0, 0, 0, w * 0.5);
+    band.addColorStop(0, 'rgba(150,126,88,0.34)'); band.addColorStop(0.6, 'rgba(150,126,88,0.20)');
+    band.addColorStop(1, 'rgba(160,138,100,0)');
+    g.fillStyle = band; g.fillRect(-w, -w, 2 * w, 2 * w); g.restore();
+
+    // dust: fine grain everywhere, denser in the middle third
+    for (let i = 0; i < 26000; i++) {
+      const y = prng() * h, x = prng() * w;
+      const mid = 1 - Math.abs(y / h - 0.5) * 1.6;
+      if (prng() > 0.35 + 0.65 * mid) continue;
+      const light = prng() < 0.5;
+      g.fillStyle = light ? 'rgba(232,220,190,' + (0.10 + prng() * 0.18).toFixed(2) + ')'
+                          : 'rgba(150,128,92,' + (0.08 + prng() * 0.16).toFixed(2) + ')';
+      g.fillRect(x, y, 1 + (prng() < 0.3 ? 1 : 0), 1);
+    }
+
+    // ball marks: a scatter of small scuffs on a length at both ends, faint
+    for (const [z0, z1] of [[4.5, 9.5], [PITCH_LEN - 9.5, PITCH_LEN - 4.5]]) {
+      for (let i = 0; i < 220; i++) {
+        const x = ux(-0.30 + gaussP(prng) * 0.55), y = vy(z0 - 0.8 + prng() * (z1 - z0 + 1.6));
+        g.fillStyle = 'rgba(122,100,68,' + (0.04 + prng() * 0.10).toFixed(2) + ')';
+        g.beginPath(); g.ellipse(x, y, 1.2 + prng() * 2.6, 1.8 + prng() * 3.6, (prng() - 0.5) * 0.6, 0, 7); g.fill();
+      }
+    }
+
+    /* Footmark rough: on day five it is a pale, crumbled, dusty patch — the top
+       has broken up — with dark holes where the boots have gone through and
+       torn pale edges. Same rectangle the ball reacts to. */
+    const rough = (x0, x1, z0, z1) => {
+      const cx = ux((x0 + x1) / 2), cy = vy((z0 + z1) / 2);
+      const rx = (x1 - x0) * PX * 0.85, ry = (z1 - z0) * PX * 0.60;
+      // the patch itself: the top has gone, so it is darker and browner than the strip
+      g.save(); g.translate(cx, cy); g.scale(rx / ry, 1);
+      const worn = g.createRadialGradient(0, 0, 0, 0, 0, ry);
+      worn.addColorStop(0, 'rgba(128,102,66,0.26)'); worn.addColorStop(0.55, 'rgba(128,102,66,0.16)'); worn.addColorStop(1, 'rgba(128,102,66,0)');
+      g.fillStyle = worn; g.fillRect(-ry * 2, -ry * 2, ry * 4, ry * 4); g.restore();
+      // boot holes: dark, elongated along the pitch, with a torn pale rim on the lit side
+      for (let i = 0; i < 64; i++) {
+        const x = ux(x0 + (x1 - x0) * 0.5 + gaussP(prng) * 0.13);
+        const y = vy(z0 + 0.15 + prng() * (z1 - z0 - 0.3));
+        const rr = 3 + prng() * 5, ry2 = 6 + prng() * 10, rot = (prng() - 0.5) * 0.6;
+        g.fillStyle = 'rgba(84,64,40,' + (0.12 + prng() * 0.18).toFixed(2) + ')';
+        g.beginPath(); g.ellipse(x, y, rr, ry2, rot, 0, 7); g.fill();
+        g.fillStyle = 'rgba(46,32,16,' + (0.08 + prng() * 0.14).toFixed(2) + ')';
+        g.beginPath(); g.ellipse(x + 0.6, y + 1, rr * 0.55, ry2 * 0.6, rot, 0, 7); g.fill();
+        g.strokeStyle = 'rgba(240,228,198,' + (0.12 + prng() * 0.16).toFixed(2) + ')';
+        g.lineWidth = 1;
+        g.beginPath(); g.ellipse(x - 1.2, y - 1.8, rr + 0.8, ry2 + 0.8, rot, Math.PI * 0.95, Math.PI * 1.85); g.stroke();
+      }
+      // loose crumbs and dust thrown around it
+      for (let i = 0; i < 420; i++) {
+        const x = ux(x0 - 0.14 + prng() * (x1 - x0 + 0.28));
+        const y = vy(z0 - 0.5 + prng() * (z1 - z0 + 1.0));
+        g.fillStyle = prng() < 0.55 ? 'rgba(90,68,42,' + (0.06 + prng() * 0.16).toFixed(2) + ')'
+                                    : 'rgba(242,230,200,' + (0.08 + prng() * 0.18).toFixed(2) + ')';
+        g.beginPath(); g.arc(x, y, 0.6 + prng() * 1.9, 0, 7); g.fill();
+      }
+    };
+    /* Wear on a length: the area the ball keeps landing on has lost its top too —
+       a broken, mottled band in the corridor at both ends, lighter than the
+       footmarks but plainly rough. Texture only; the ball's behaviour comes from
+       the cracks and the footmark rough. */
+    const lengthWear = (z0, z1, xc) => {
+      for (let i = 0; i < 34; i++) {
+        const x = ux(xc + gaussP(prng) * 0.28), y = vy(z0 + prng() * (z1 - z0));
+        const rr = 5 + prng() * 12, ry2 = 8 + prng() * 18, rot = (prng() - 0.5) * 0.5;
+        g.fillStyle = 'rgba(132,108,72,' + (0.07 + prng() * 0.10).toFixed(2) + ')';
+        g.beginPath(); g.ellipse(x, y, rr, ry2, rot, 0, 7); g.fill();
+        g.fillStyle = 'rgba(232,218,186,' + (0.06 + prng() * 0.10).toFixed(2) + ')';
+        g.beginPath(); g.ellipse(x - 2, y - 2, rr * 0.6, ry2 * 0.5, rot, 0, 7); g.fill();
+      }
+      for (let i = 0; i < 260; i++) {
+        const x = ux(xc + gaussP(prng) * 0.34), y = vy(z0 - 0.3 + prng() * (z1 - z0 + 0.6));
+        g.fillStyle = prng() < 0.5 ? 'rgba(96,74,46,' + (0.08 + prng() * 0.18).toFixed(2) + ')' : 'rgba(240,228,198,' + (0.08 + prng() * 0.18).toFixed(2) + ')';
+        g.beginPath(); g.arc(x, y, 0.6 + prng() * 1.6, 0, 7); g.fill();
+      }
+    };
+    lengthWear(5.2, 8.6, -0.28);
+    lengthWear(PITCH_LEN - 8.6, PITCH_LEN - 5.2, 0.28);
+    rough(ROUGH.x0, ROUGH.x1, ROUGH.z0, ROUGH.z1);
+    rough(-ROUGH.x1, -ROUGH.x0, PITCH_LEN - ROUGH.z1, PITCH_LEN - ROUGH.z0);
+
+    /* Cracks. Fine, dark, mostly running down the pitch, drawn as smooth curves
+       through the crack data (the data is what the ball checks) with a faint
+       pale lip on one side, short branches, and a lattice of hairlines that
+       connect them — a dried-out top breaks into plates, it does not doodle. */
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const smoothPath = pts => {
+      g.beginPath();
+      g.moveTo(ux(pts[0][0]), vy(pts[0][1]));
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+        g.quadraticCurveTo(ux(x0), vy(z0), ux((x0 + x1) / 2), vy((z0 + z1) / 2));
+      }
+      const [xl, zl] = pts[pts.length - 1]; g.lineTo(ux(xl), vy(zl));
+    };
+    for (const c of CRACKS) {
+      const wpx = Math.max(1.0, c.w * PX * 0.55);
+      g.strokeStyle = 'rgba(236,224,196,0.30)'; g.lineWidth = wpx + 1.2;
+      g.save(); g.translate(-0.8, -0.8); smoothPath(c.pts); g.stroke(); g.restore();
+      g.strokeStyle = 'rgba(78,60,38,0.72)'; g.lineWidth = wpx;
+      smoothPath(c.pts); g.stroke();
+      if (wpx > 1.6) { g.strokeStyle = 'rgba(46,32,16,0.55)'; g.lineWidth = wpx * 0.4; smoothPath(c.pts); g.stroke(); }
+      // branches: short, thin, mostly leaving at a shallow angle
+      for (let k = 1; k < c.pts.length; k++) {
+        if (prng() < 0.45) continue;
+        const [x, z] = c.pts[k];
+        const len = 8 + prng() * 26, ang = (prng() < 0.5 ? -1 : 1) * (0.35 + prng() * 0.6) + (prng() < 0.5 ? 0 : Math.PI);
+        g.strokeStyle = 'rgba(78,60,38,' + (0.35 + prng() * 0.25).toFixed(2) + ')'; g.lineWidth = 0.7 + prng() * 0.5;
+        g.beginPath(); g.moveTo(ux(x), vy(z));
+        g.lineTo(ux(x) + Math.sin(ang) * len, vy(z) - Math.cos(ang) * len);
+        g.stroke();
+      }
+    }
+    // hairline lattice — texture only, the ball ignores these
+    for (let i = 0; i < 70; i++) {
+      let x = w * (0.06 + prng() * 0.88), y = h * (0.06 + prng() * 0.88);
+      const along = prng() < 0.7;
+      g.strokeStyle = 'rgba(96,76,50,' + (0.14 + prng() * 0.22).toFixed(2) + ')';
+      g.lineWidth = 0.5 + prng() * 0.6;
+      g.beginPath(); g.moveTo(x, y);
+      const steps = 3 + (prng() * 6 | 0);
+      for (let s = 0; s < steps; s++) {
+        if (along) { x += (prng() - 0.5) * 9; y += (prng() < 0.5 ? -1 : 1) * (16 + prng() * 40); }
+        else       { x += (prng() < 0.5 ? -1 : 1) * (12 + prng() * 30); y += (prng() - 0.5) * 9; }
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+  });
+}
+
+/* ---------- the ball: a seam, and it spins ---------- */
+let ballSeam = null;
+function dressBall() {
+  if (!ball || ballSeam) return;
+  ball.material.color.setHex(0xc9352a);
+  const seamMat = new THREE.MeshLambertMaterial({ color: 0xe9dfc6 });
+  ballSeam = new THREE.Group();
+  for (const off of [-0.16, 0.16]) {            // two rows of stitching either side of the equator
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(BALL_R * 0.975, BALL_R * 0.07, 6, 40), seamMat);
+    ring.rotation.y = Math.PI / 2;                // ring in the Y–Z plane: seam upright, pointing down the pitch
+    ring.position.x = off * BALL_R;
+    ballSeam.add(ring);
+  }
+  ball.add(ballSeam);
+  ballSeam.visible = true;
+}
+/* Backspin: rotate with distance travelled. Called from the frame hook. */
+let lastBallZ = null;
+function spinBall() {
+  if (!ball || !ball.visible) { lastBallZ = null; return; }
+  if (lastBallZ !== null) {
+    const dz = lastBallZ - ball.position.z;       // toward the batsman is -Z
+    if (Math.abs(dz) < 1) ball.rotation.x -= dz / BALL_R * 0.25;   // a quarter of a rolling rate: seam-up wobble, not a blur
+  }
+  lastBallZ = ball.position.z;
+}
+
+/* ---------- the stumps ---------- */
+function dressWicket(wk) {
+  if (!wk || wk.dressed) return;
+  wk.dressed = true;
+  const ash = new THREE.MeshLambertMaterial({ color: 0xe3d6b8 });
+  const cap = new THREE.MeshLambertMaterial({ color: 0x2f4358 });   // the dark sponsor band at the top
+  const bailMat = new THREE.MeshLambertMaterial({ color: 0xdccda9 });
+  const R = STUMP_R;
+  wk.parts.forEach(p => { p.visible = false; });
+  const parts = [];
+  for (const x of [-STUMP_X, 0, STUMP_X]) {
+    // body: a slight taper, dome on top, a pale foot where it goes into the ground
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.86, R, STUMP_H - 0.05, 14), ash);
+    body.position.set(x, (STUMP_H - 0.05) / 2, 0);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.88, R * 0.87, 0.05, 14), cap);
+    band.position.set(x, STUMP_H - 0.025, 0);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(R * 0.88, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), cap);
+    dome.position.set(x, STUMP_H, 0);
+    wk.group.add(body, band, dome); parts.push(body, band, dome);
+    for (const p of [body, band, dome]) { p.material = p.material.clone(); p.userData.base = p.material.color.getHex(); }
+  }
+  for (const x of [-STUMP_X / 2, STUMP_X / 2]) {
+    // bails: a barrel with two thinner spigots, sitting just above the domes
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0115, 0.0115, STUMP_X * 0.46, 10), bailMat);
+    barrel.rotation.z = Math.PI / 2; barrel.position.set(x, STUMP_H + R * 0.88 + 0.006, 0);
+    const spig = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, STUMP_X * 1.02, 8), bailMat);
+    spig.rotation.z = Math.PI / 2; spig.position.copy(barrel.position);
+    wk.group.add(barrel, spig); parts.push(barrel, spig);
+    for (const p of [barrel, spig]) { p.material = p.material.clone(); p.userData.base = p.material.color.getHex(); }
+  }
+  wk.parts = parts;
+}
+
+/* ---------- the sightscreen: an object, not a hole ---------- */
+function screenTexture() {
+  return canvasTex(256, 512, (g, w, h) => {
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#24303c'); grad.addColorStop(1, '#1a2430');
+    g.fillStyle = grad; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(255,255,255,0.045)';
+    for (let i = 1; i < 6; i++) g.fillRect(0, (h * i / 6) | 0, w, 2);     // panel joins
+    g.fillStyle = 'rgba(0,0,0,0.10)';
+    for (let i = 1; i < 6; i++) g.fillRect(0, ((h * i / 6) | 0) + 2, w, 3);
+  });
+}
+
+/* ---------- creases: chalk, not paint ---------- */
+function chalkTexture(alongU) {
+  return canvasTex(256, 32, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    const prng = mulberry32(0x51ab);
+    g.fillStyle = 'rgba(236,230,216,0.92)'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) {           // worn speckle
+      g.fillStyle = 'rgba(236,230,216,' + (prng() < 0.5 ? 0.0 : 0.5) + ')';
+      g.globalCompositeOperation = 'destination-out';
+      g.globalAlpha = 0.25 + prng() * 0.45;
+      g.fillRect(prng() * w, prng() * h, 1 + prng() * 2, 1 + prng() * 2);
+    }
+    g.globalCompositeOperation = 'destination-out'; g.globalAlpha = 1;
+    const fade = g.createLinearGradient(alongU ? 0 : 0, alongU ? 0 : 0, alongU ? w : 0, alongU ? 0 : h);
+    fade.addColorStop(0, 'rgba(0,0,0,0.55)'); fade.addColorStop(0.06, 'rgba(0,0,0,0)');
+    fade.addColorStop(0.94, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,0.55)');
+    g.fillStyle = fade; g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+  });
+}
+
+/* ---------- the moment of impact ---------- */
+/* A quarter-second dimming of everything but the ball and pad: a soft dark
+   vignette centred on the impact point in screen space, in fast, out slow. */
+function impactFlash() {
+  const el = document.getElementById('impactDim');
+  if (!el || !d) return;
+  const v = new THREE.Vector3(d.ix, d.iy, d.iz).project(camera);
+  const x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
+  el.style.background = 'radial-gradient(circle at ' + x.toFixed(0) + 'px ' + y.toFixed(0) + 'px, rgba(0,0,0,0) 0, rgba(0,0,0,0) 7%, rgba(0,0,0,0.30) 38%, rgba(0,0,0,0.34) 100%)';
+  el.classList.add('on');
+  setTimeout(() => el.classList.remove('on'), 150);
+}
+
+/* ---------- colour: pull the whole picture back a notch ---------- */
+function polishGround() {
+  const chalkU = chalkTexture(true), chalkV = chalkTexture(false);
+  scene.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const g = o.geometry && o.geometry.type;
+    const hex = o.material.color ? o.material.color.getHex() : -1;
+    if (g === 'PlaneGeometry' && hex === 0x16351f) {                    // sightscreen
+      o.material = new THREE.MeshLambertMaterial({ color: 0xffffff, map: screenTexture() }); return;
+    }
+    if (g === 'BoxGeometry' && hex === 0x0f2417) { o.material.color.setHex(0x141b23); return; }   // its frame
+    if (g === 'PlaneGeometry' && hex === 0xf0ebe0 && o.material.isMeshBasicMaterial) {          // creases
+      const p = o.geometry.parameters;
+      o.material = new THREE.MeshBasicMaterial({ color: 0xffffff, map: p.width > p.height ? chalkU : chalkV, transparent: true, depthWrite: false });
+      return;
+    }
+    if (!o.material.map) return;
+    if (g === 'CircleGeometry' && o.geometry.parameters.radius === 70) {
+      o.material.map = outfieldTexture('#356a2e', '#30632a', 14); o.material.needsUpdate = true;
+    } else if (g === 'PlaneGeometry' && o.geometry.parameters.width === 26) {
+      o.material.map = outfieldTexture('#39712f', '#346a2b', 9); o.material.needsUpdate = true;
+    } else if (g === 'CylinderGeometry' && o.geometry.parameters.height >= 1) {
+      o.material.color.setHex(0xc2c6c9);              // the crowd: a quarter darker, so the backdrop sits back
+    } else if (g === 'PlaneGeometry' && Math.abs(o.geometry.parameters.width - PITCH_W) < 1e-6) {
+      o.material.map = pitchTextureV2(); o.material.color.setHex(0xe4ddcd); o.material.needsUpdate = true;
+    }
+  });
+}
+
+/* Hook: after every rendered frame the ball spins; everything else is once. */
+{
+  const boot = () => {
+    if (typeof scene === 'undefined' || !scene || typeof ball === 'undefined' || !ball) return false;
+    polishGround();
+    dressBall();
+    if (typeof stumpsNear !== 'undefined') dressWicket(stumpsNear);
+    if (typeof stumpsFar !== 'undefined') dressWicket(stumpsFar);
+    if (POLISH_TONEMAP) {
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.12;
+      scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+    }
+    if (typeof onImpact === 'function') { const _onImpact = onImpact; onImpact = function () { _onImpact(); impactFlash(); }; }
+    const _render = renderer.render.bind(renderer);
+    renderer.render = function (s, c) { spinBall(); _render(s, c); };
+    return true;
+  };
+  if (!boot()) { const iv = setInterval(() => { if (boot()) clearInterval(iv); }, 50); }
+}
+</script>
+<script>
+/* ============================================================
+   BAT TAP — while he waits for the ball he taps the bat behind his back foot.
+   Idle only; the moment BOWL is pressed the run-up takes over from the stance.
+   Two taps, a pause, two taps — the rhythm every batsman has.
+   ============================================================ */
+{
+  const TAP = 0.62;                       // seconds per tap
+  const tapAmount = t => {
+    const c = (t / TAP) % 4;              // tap, tap, rest, rest
+    if (c >= 2) return 0;
+    return Math.pow(Math.max(0, Math.sin((c % 1) * Math.PI)), 1.6);
+  };
+  const _frame = frame;
+  frame = function (now) {
+    _frame(now);
+    if (phase !== 'idle' || !batter.ready || typeof d === 'undefined' || !d) return;
+    const k = tapAmount(now / 1000);
+    const S = Object.assign({}, K.stance);
+    S.batEl = lerp(K.stance.batEl, 3, k);                                   // toe goes down to the turf
+    S.grip = [K.stance.grip[0], K.stance.grip[1] - 0.07 * k, K.stance.grip[2] - 0.02 * k];
+    S.headUp = K.stance.headUp;
+    poseFigure(batter, S);
+    renderer.render(scene, camera);
+  };
+}
+</script>
+<script>
+/* ============================================================
+   TODAY'S OVER — the card before the first ball.
+   A real umpire knows who is bowling before he takes his mark. The card says
+   arm, pace and side of the wicket (never which way it is moving — reading
+   that is the job), gives the bowler a name so days are talked about as
+   people, and hands over to the Bowl button. Shown once per over, daily and
+   practice. Nothing about the over itself changes.
+   ============================================================ */
+{
+  const css = document.createElement('style');
+  css.textContent = `
+  #overCard{display:none;position:fixed;inset:0;background:rgba(5,8,12,.78);z-index:6;overflow:auto;padding:0 14px}
+  #overCard .oc{max-width:420px;margin:14vh auto 0;background:rgba(8,12,18,.97);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;text-align:center}
+  #overCard .ocKick{font:700 10.5px var(--label);letter-spacing:2.6px;text-transform:uppercase;color:var(--dim)}
+  #overCard .ocDate{font:700 10.5px var(--label);letter-spacing:1.8px;text-transform:uppercase;color:#5f7484;margin-top:3px}
+  #overCard .ocName{font:400 34px/1 var(--display);letter-spacing:1px;color:#fff;margin:14px 0 6px}
+  #overCard .ocStyle{font:700 14px var(--label);letter-spacing:2px;text-transform:uppercase;color:var(--teal)}
+  #overCard .ocSide{font:700 11px var(--label);letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);margin-top:4px}
+  #overCard .ocPace{display:inline-block;margin-top:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;font:700 11px var(--label);letter-spacing:1.6px;text-transform:uppercase;color:#cdd8e0}
+  #overCard .ocBlurb{font-size:13px;line-height:1.5;color:#b9c6d0;margin:14px 6px 16px}
+  #overCard .wide{margin-top:2px}
+  #overCard .ocNote{font-size:11px;color:#5f7484;margin-top:10px;line-height:1.4}`;
+  document.head.appendChild(css);
+
+  const el = document.createElement('div');
+  el.id = 'overCard';
+  el.innerHTML = '<div class="oc"><div class="ocKick" id="ocKick"></div><div class="ocDate" id="ocDate"></div>' +
+    '<div class="ocName" id="ocName"></div><div class="ocStyle" id="ocStyle"></div><div class="ocSide" id="ocSide"></div>' +
+    '<div><span class="ocPace" id="ocPace"></span></div><div class="ocBlurb" id="ocBlurb"></div>' +
+    '<button class="wide" id="ocGo">Take the field ▶</button><div class="ocNote" id="ocNote"></div></div>';
+  document.body.appendChild(el);
+
+  /* No names (Pat: fake names don't land) — a descriptor of what he is,
+     read off the over that has actually been built: the biggest turn or swing
+     in it, his bounce, which side of the wicket. It says what kind of bowler
+     you are facing, never which way a given ball will go. */
+  const BLURB = {
+    fast:   ['Hits the deck hard and skids on. Height is the question with him.',
+             'Quick, and he bowls a heavy ball. The short one will come.',
+             'Genuine pace with a full length in his locker. Watch the yorker.',
+             'Tall, gets it to climb from nothing. Do not assume it is going over.'],
+    medium: ['Nagging length, nothing wasted. Every ball asks a question.',
+             'Wobble seam at a lively pace — it does a bit both ways off the pitch.',
+             'Skiddy and full. Pitches it up and lets the pitch do the rest.',
+             'Old-fashioned line and length, with one that shapes late.'],
+    off:    ['Flights it and gives it a rip. The rough outside off is in play.',
+             'Classical finger spin: drift, dip, and the odd one that spits.',
+             'Bowls it slow and lets it grip. The straighter one is the trap.',
+             'Loops it above the eyeline. Length is harder to read than it looks.'],
+    wrist:  ['Leg breaks with real revs, and a straight one he hides well.',
+             'Rips it out of the front of the hand. Some turn a long way, some not at all.',
+             'Big turner on his day. The googly is in there somewhere.',
+             'Quick through the air for a wrist spinner. It hurries on to the pad.']
+  };
+  const AROUND = ['From wide of the crease he angles it in across you.', 'Round the wicket, so the angle is doing some of the work.'];
+
+  function h32(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  const dayText = k => { const d = new Date(k + 'T12:00:00'); return isNaN(d) ? k : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); };
+
+  function descriptor(B, balls) {
+    const maxTurn = Math.max(...balls.map(x => Math.abs(x.dev)));
+    const swingers = balls.filter(x => Math.abs(x.swing) > 0.7).length;
+    const cracks = balls.filter(x => x.offCrack).length;
+    const la = B.hand === 'left' ? 'Left-Arm ' : '';
+    if (B.style === 'spin') {
+      if (maxTurn > 1.4) return 'The Big Turner';
+      if (B.wrist) return la ? 'The Left-Arm Wristie' : 'The Leggie';
+      if (B.around) return 'The ' + la + 'Angle Spinner';
+      return la ? 'The Left-Arm Orthodox' : 'The Off-Spinner';
+    }
+    const fast = B.style === 'fast';
+    if (cracks >= 2) return 'The ' + la + 'Crack Hunter';
+    if (swingers >= 4) return 'The ' + la + 'Swing Bowler';
+    if (B.around) return 'The ' + la + 'Angle Merchant';
+    if (B.bounceTrait > 1.08) return fast ? 'The Tall ' + (la ? 'Left-Armer' : 'Quick') : 'The ' + la + 'Hit-the-Deck Seamer';
+    if (B.bounceTrait < 0.93) return fast ? 'The Skiddy ' + (la ? 'Left-Armer' : 'Quick') : 'The ' + la + 'Skidder';
+    if (fast) return la ? 'The Left-Arm Quick' : 'The Out-and-Out Quick';
+    return swingers >= 3 ? 'The ' + la + 'Wobble-Seamer' : 'The ' + la + 'Nagging Seamer';
+  }
+
+  function describe(B, seedish) {
+    const kind = B.style === 'spin' ? (B.wrist ? 'wrist' : 'off') : B.style;
+    const h = h32(seedish + '|' + B.style + '|' + B.hand + '|' + (B.wrist ? 'w' : 'f'));
+    const name = descriptor(B, over);
+    const style = (B.hand === 'right' ? 'Right-arm ' : 'Left-arm ') +
+      (B.style === 'spin' ? (B.wrist ? (B.hand === 'right' ? 'leg spin' : 'wrist spin') : 'off spin') : B.style === 'fast' ? 'fast' : 'medium pace');
+    const side = B.around ? 'Round the wicket' : 'Over the wicket';
+    const pace = B.style === 'fast' ? '86–97 mph' : B.style === 'medium' ? '72–84 mph' : '44–60 mph · lots of air';
+    let blurb = BLURB[kind][(h >>> 8) % BLURB[kind].length];
+    if (B.around) blurb += ' ' + AROUND[(h >>> 16) % AROUND.length];
+    return { name, style, side, pace, blurb };
+  }
+
+  let shownFor = null;
+  function showCard() {
+    const B = BOWLER; if (!B) return;
+    const seedish = (typeof practice !== 'undefined' && practice) ? String(Math.random()) : SEED_KEY;
+    const t = describe(B, seedish);
+    const isPractice = typeof practice !== 'undefined' && practice;
+    E('ocKick').textContent = isPractice ? 'Practice over' : "Today's over";
+    E('ocDate').textContent = isPractice ? 'Does not count for the board' : dayText(SEED_KEY);
+    E('ocName').textContent = t.name;
+    E('ocStyle').textContent = t.style;
+    E('ocSide').textContent = t.side;
+    E('ocPace').textContent = t.pace;
+    E('ocBlurb').textContent = t.blurb;
+    E('ocNote').textContent = 'Six balls. One look at each. Call it before the umpire at the other end does.';
+    el.style.display = 'block';
+    E('bowlerBar').textContent = t.name.replace(/^The /, '') + ' · ' + t.style + (B.around ? ' · round the wicket' : '');
+  }
+  window.__showOverCard = showCard; window.__hideOverCard = () => { el.style.display = 'none'; };
+  E('ocGo').onclick = () => { el.style.display = 'none'; };
+  addEventListener('keydown', e => { if (el.style.display === 'block' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); el.style.display = 'none'; } }, true);
+
+  // first over of the day: once the figures are in
+  {
+    const iv = setInterval(() => {
+      if (typeof batter === 'undefined' || !batter.ready) return;
+      clearInterval(iv);
+      if (new URLSearchParams(location.search).has('nocard')) return;   // render tools
+      if (phase === 'idle' && (typeof ballIdx === 'undefined' || ballIdx === 0)) showCard();
+    }, 200);
+  }
+  // practice overs
+  {
+    const again = E('again'), prev = again.onclick;
+    again.onclick = function (ev) { if (prev) prev.call(this, ev); showCard(); };
+  }
+}
+</script>
+<script>
+/* ============================================================
+   THE OTHER UMPIRES — after your call, what everyone else gave.
+   One anonymous row per call (day, ball, out/notout) through a Supabase
+   function that inserts and hands back the tally. Daily over only, once per
+   ball per browser, and never allowed to break the game: if the function is
+   not there yet the line simply does not appear.
+   ============================================================ */
+{
+  const css = document.createElement('style');
+  css.textContent = `#crowd{display:none;font:700 12px var(--label);letter-spacing:1px;text-transform:uppercase;color:#8fb9c9;margin:-4px 0 10px}
+  #crowd b{color:#fff;font-size:13px} #crowd i{font-style:normal;color:var(--dim);font-weight:600;letter-spacing:.6px;text-transform:none}`;
+  document.head.appendChild(css);
+  const line = document.createElement('div'); line.id = 'crowd';
+  const why = E('why'); why.parentNode.insertBefore(line, why.nextSibling);
+
+  const doneKey = (day, n) => 'oo3d:call:' + day + ':' + n;
+  async function tell(day, n, mine) {
+    line.style.display = 'none';
+    if (!lbEnabled() || !LB.client || !isDaily() || practice) return;
+    try {
+      const already = lsGet(doneKey(day, n));
+      let r;
+      if (already && already.out !== undefined) r = { data: already };
+      else {
+        r = await LB.client.rpc('record_call', { p_day: day, p_ball: n, p_call: mine });
+        if (r.error) return;
+        lsSet(doneKey(day, n), r.data);
+      }
+      const t = r.data || {}; const o = +t.out || 0, no = +t.notout || 0, all = o + no;
+      if (all < 3) { line.innerHTML = '<i>You are one of the first umpires on this ball.</i>'; line.style.display = 'block'; return; }
+      const pct = Math.round(100 * (d.truth === 'out' ? o : no) / all);
+      line.innerHTML = '<b>' + pct + '%</b> of umpires got this one <i>· ' + all + ' calls</i>';
+      line.style.display = 'block';
+    } catch (e) { /* never in the way of the game */ }
+  }
+
+  const _finish = finish;
+  finish = function () {
+    _finish();
+    const mine = call === 'out' ? 'out' : 'notout';
+    tell(lbDay(), ballIdx + 1, mine);
+  };
+}
 </script>
