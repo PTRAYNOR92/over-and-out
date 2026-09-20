@@ -6833,3 +6833,315 @@ function polishGround() {
   };
 }
 </script>
+<script>
+/* ============================================================
+   COME BACK TOMORROW — streaks, an umpire rating, the most argued ball,
+   nation v nation, and a share image.
+
+   Everything degrades: with no Supabase, or before the SQL has been run,
+   streaks and rating live in this browser only and the board looks as it did.
+   Server truth (post_over / day_splits / nation_board) takes over the moment
+   the functions exist. Nothing here touches the over itself.
+   ============================================================ */
+{
+  const css = document.createElement('style');
+  css.textContent = `
+  .rk{display:inline-block;font:700 9.5px var(--label);letter-spacing:1px;color:#06231e;background:var(--teal);border-radius:4px;padding:2px 6px;margin-right:6px;vertical-align:1px}
+  .fl{font:700 11px var(--label);letter-spacing:.6px;color:#ffb35c;margin-left:6px;white-space:nowrap}
+  #retain{font:700 12px var(--label);letter-spacing:1.2px;text-transform:uppercase;color:#cfe4ea;margin:4px 0 8px;line-height:1.7}
+  #retain b{color:#fff} #retain .up{color:#3ad17f} #retain .dn{color:#ff6a5d}
+  #argued{font-size:12.5px;line-height:1.45;color:var(--dim);margin:0 0 10px}
+  #argued b{color:var(--ink)} #argued .bar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:6px auto 0;max-width:260px;background:#26384a}
+  #argued .bar i{display:block;background:var(--red)} #argued .bar em{display:block;background:var(--green)}
+  #shareImg{margin-top:6px}
+  #bCard .cStats{font:700 11px var(--label);letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);margin-top:8px}
+  #bCard .cStats b{color:var(--ink)}
+  #board .tab.nat3{flex:1}
+  .bRow .bNat{font:700 15px var(--label);color:var(--amber);width:44px}
+  .bRow .bSub{font-size:11px;color:var(--dim);flex:1}`;
+  document.head.appendChild(css);
+
+  /* ---------- ranks ---------- */
+  const BANDS = [[1450, 'Elite Panel'], [1350, 'Test'], [1250, 'First-Class'], [1150, 'County'], [1050, 'League'], [950, 'Club'], [0, 'Village']];
+  const band = r => (BANDS.find(b => (r || 1000) >= b[0]) || BANDS[BANDS.length - 1])[1];
+
+  /* ---------- local memory (works signed out) ---------- */
+  const yesterdayOf = day => { const d = new Date(day + 'T12:00:00'); d.setDate(d.getDate() - 1); const p = n => (n < 10 ? '0' : '') + n; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
+  const local = () => lsGet('oo3d:streak') || { last: null, n: 0, best: 0, rating: 1000 };
+  function localBump(day, delta) {
+    const s = local();
+    if (s.last !== day) {
+      s.n = s.last === yesterdayOf(day) ? s.n + 1 : 1;
+      s.best = Math.max(s.best || 0, s.n); s.last = day;
+      s.rating = Math.max(600, Math.min(2000, (s.rating || 1000) + delta));
+      lsSet('oo3d:streak', s);
+    }
+    return s;
+  }
+  // the streak you currently hold: alive if you played today or yesterday
+  function streakNow() {
+    const s = LB.user && LB.streak !== undefined ? { n: LB.streak, best: LB.best, last: LB.lastDay } : local();
+    const today = todayKey();
+    if (s.last === today || s.last === yesterdayOf(today)) return { n: s.n || 0, best: s.best || 0, playedToday: s.last === today };
+    return { n: 0, best: s.best || 0, playedToday: false };
+  }
+  const ratingNow = () => (LB.user && LB.rating) || local().rating || 1000;
+
+  /* ---------- the day's rating change ----------
+     Per ball: K × (1 − p) if you were right, −K × p if wrong, where p is the
+     share of umpires who got it right (0.6 until enough have called) and K is
+     24 for a whisker, 10 for a plain one. A plumb ball everyone gets moves you
+     almost nothing; the tight one the world missed moves you a lot. */
+  function overDelta() {
+    let sum = 0;
+    for (let i = 0; i < over.length; i++) {
+      const d = over[i], ok = results[i] === 'right';
+      const t = lsGet('oo3d:call:' + lbDay() + ':' + (i + 1)) || {};
+      const o = +t.out || 0, n = +t.notout || 0, all = o + n;
+      const p = all >= 5 ? (d.truth === 'out' ? o : n) / all : 0.6;
+      const K = d.tight ? 24 : 10;
+      sum += ok ? K * (1 - p) : -K * p;
+    }
+    return Math.max(-60, Math.min(60, Math.round(sum)));
+  }
+
+  /* ---------- profile columns, if the SQL has been run ---------- */
+  LB.retCol = null;
+  const _lbProfileRead = lbProfileRead;
+  lbProfileRead = async function (id) {
+    if (LB.retCol !== false) {
+      const r = await LB.client.from('profiles').select('name,nation,rating,streak,best_streak,last_day').eq('id', id).maybeSingle();
+      if (!r.error) {
+        LB.retCol = true; LB.natCol = true;
+        if (r.data) { LB.rating = r.data.rating; LB.streak = r.data.streak; LB.best = r.data.best_streak; LB.lastDay = r.data.last_day; }
+        return r;
+      }
+      if (r.error.code !== '42703') return r;
+      LB.retCol = false;
+    }
+    return _lbProfileRead(id);
+  };
+
+  /* ---------- posting: one call does score, streak and rating ---------- */
+  const _lbPost = lbPost;
+  lbPost = async function (r) {
+    if (!LB.user || !LB.client) return false;
+    if (LB.retCol !== false) {
+      try {
+        const res = await LB.client.rpc('post_over', { p_day: r.day, p_score: r.score, p_grid: r.grid, p_bowler: r.bowler || null, p_delta: r.delta || 0 });
+        if (!res.error) {
+          const j = res.data || {};
+          LB.streak = j.streak; LB.best = j.best; LB.rating = j.rating; LB.lastDay = r.day;
+          r.posted = true; lsSet(resultKey(), r);
+          paintRetain();
+          return true;
+        }
+        if (!/PGRST202|42883|not find|does not exist/i.test(res.error.message + res.error.code)) { console.warn('post_over:', res.error); return false; }
+        LB.retCol = false;   // function not there yet — the plain insert still works
+      } catch (e) { /* fall through */ }
+    }
+    return _lbPost(r);
+  };
+
+  /* ---------- end of over: streak, rating, the argued ball, the share text ---------- */
+  const _endOver = endOver;
+  endOver = function () {
+    const daily = isDaily() && !practice;
+    const delta = daily ? overDelta() : 0;
+    _endOver();
+    if (daily) {
+      const r = lsGet(resultKey());
+      if (r && r.delta === undefined) { r.delta = delta; lsSet(resultKey(), r); }
+      localBump(lbDay(), delta);
+      LB.lastDelta = delta;
+    }
+    paintRetain(daily ? delta : null);
+    if (daily) argued();
+  };
+
+  let retainEl = null, arguedEl = null;
+  function paintRetain(delta) {
+    if (!retainEl) {
+      retainEl = document.createElement('div'); retainEl.id = 'retain';
+      arguedEl = document.createElement('div'); arguedEl.id = 'argued';
+      const g = E('grid'); g.parentNode.insertBefore(retainEl, g.nextSibling); g.parentNode.insertBefore(arguedEl, retainEl.nextSibling);
+    }
+    if (delta === null) { retainEl.innerHTML = 'Practice over · nothing counted'; return; }
+    const s = streakNow(), r = ratingNow(), dl = delta === undefined ? LB.lastDelta : delta;
+    const dTxt = dl === undefined ? '' : ' <span class="' + (dl >= 0 ? 'up' : 'dn') + '">' + (dl >= 0 ? '+' : '') + dl + '</span>';
+    retainEl.innerHTML = '🔥 <b>' + s.n + '</b>-day streak' + (s.best > s.n ? ' · best ' + s.best : '') +
+      '<br>' + '<span class="rk">' + band(r) + '</span><b>' + r + '</b>' + dTxt;
+    shareText = shareLine();
+  }
+  function shareLine() {
+    const right = results.filter(x => x === 'right').length, grid = results.map(x => ({ right: '🟩', wrong: '🟥' }[x] || '⬛')).join('');
+    const s = streakNow(), r = ratingNow();
+    let t = 'Over & Out — ' + SEED_KEY + '\n' + grid + '  ' + right + '/' + BALLS_PER_OVER;
+    if (isDaily() && !practice) t += '\n🔥 ' + s.n + '-day streak · ' + band(r) + ' umpire';
+    if (LB.arguedLine) t += '\n' + LB.arguedLine;
+    return t + '\noverandoutgame.com';
+  }
+
+  // the ball that split the umpires closest to 50/50, once ten have called it
+  async function argued() {
+    LB.arguedLine = null; arguedEl.innerHTML = '';
+    if (!lbEnabled() || !LB.client) return;
+    try {
+      const res = await LB.client.rpc('day_splits', { p_day: lbDay() });
+      if (res.error || !res.data) return;
+      let best = null;
+      for (const row of res.data) {
+        const all = +row.outs + +row.notouts; if (all < 10) continue;
+        const split = Math.abs(+row.outs / all - 0.5);
+        if (!best || split < best.split) best = { ball: +row.ball, outs: +row.outs, notouts: +row.notouts, all, split };
+      }
+      if (!best) return;
+      const d = over[best.ball - 1], pctOut = Math.round(100 * best.outs / best.all);
+      const mine = results[best.ball - 1];
+      const you = mine === undefined ? '' : ' — you were <b>' + (mine === 'right' ? 'right' : 'wrong') + '</b>';
+      arguedEl.innerHTML = 'Most argued: <b>ball ' + best.ball + '</b> split the umpires <b>' + pctOut + '/' + (100 - pctOut) + '</b> (it was ' + (d.truth === 'out' ? 'out' : 'not out') + ')' + you +
+        '<div class="bar"><i style="width:' + pctOut + '%"></i><em style="width:' + (100 - pctOut) + '%"></em></div>';
+      LB.arguedLine = 'Most argued: ball ' + best.ball + ' split us ' + pctOut + '/' + (100 - pctOut);
+      shareText = shareLine();
+    } catch (e) { /* never in the way */ }
+  }
+
+  /* ---------- the share image ---------- */
+  const shareBtn = E('share');
+  const imgBtn = document.createElement('button'); imgBtn.className = 'ghost'; imgBtn.id = 'shareImg'; imgBtn.textContent = 'Share as image';
+  shareBtn.parentNode.insertBefore(imgBtn, shareBtn.nextSibling);
+  imgBtn.onclick = async () => {
+    const blob = await shareImage();
+    const file = new File([blob], 'over-and-out-' + SEED_KEY + '.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: shareText }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+    imgBtn.textContent = '✓ Saved'; setTimeout(() => { imgBtn.textContent = 'Share as image'; }, 1800);
+  };
+  window.__shareImage = () => shareImage();
+  function shareImage() {
+    const W = 1080, H = 1350, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    const right = results.filter(v => v === 'right').length;
+    const s = streakNow(), r = ratingNow();
+    x.fillStyle = '#070a0f'; x.fillRect(0, 0, W, H);
+    // a strip of pitch colour at the foot, as a nod to the ground
+    const g = x.createLinearGradient(0, H - 260, 0, H); g.addColorStop(0, '#070a0f'); g.addColorStop(1, '#173a1c'); x.fillStyle = g; x.fillRect(0, H - 260, W, 260);
+    x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+    x.fillStyle = '#eaf1f6'; x.font = '400 92px Anton, "Arial Narrow", sans-serif';
+    const t1 = 'OVER ', t2 = '&', t3 = ' OUT'; const w1 = x.measureText(t1).width, w2 = x.measureText(t2).width, w3 = x.measureText(t3).width; const x0 = W / 2 - (w1 + w2 + w3) / 2;
+    x.textAlign = 'left'; x.fillText(t1, x0, 190); x.fillStyle = '#36e3c8'; x.fillText(t2, x0 + w1, 190); x.fillStyle = '#eaf1f6'; x.fillText(t3, x0 + w1 + w2, 190);
+    x.textAlign = 'center'; x.fillStyle = '#8aa0b0'; x.font = '700 26px "Barlow Condensed", sans-serif';
+    x.fillText('THE DAILY LBW OVER  ·  ' + SEED_KEY.toUpperCase(), W / 2, 240);
+    x.fillStyle = '#7fd8c8'; x.font = '700 28px "Barlow Condensed", sans-serif';
+    x.fillText((E('bowlerBar').textContent || BOWLER.label).toUpperCase(), W / 2, 290);
+    x.fillStyle = '#36e3c8'; x.font = '400 300px Anton, sans-serif'; x.fillText(right + '/6', W / 2, 600);
+    // the six squares
+    const sq = 92, gap = 22, total = 6 * sq + 5 * gap; let sx = W / 2 - total / 2;
+    for (let i = 0; i < 6; i++) {
+      x.fillStyle = results[i] === 'right' ? '#28b765' : results[i] === 'wrong' ? '#e23b2c' : '#26384a';
+      x.beginPath(); x.roundRect(sx + i * (sq + gap), 660, sq, sq, 16); x.fill();
+    }
+    x.fillStyle = '#eaf1f6'; x.font = '700 40px "Barlow Condensed", sans-serif';
+    let line = (isDaily() && !practice) ? '🔥 ' + s.n + '-DAY STREAK   ·   ' + band(r).toUpperCase() + ' UMPIRE  ' + r : 'PRACTICE OVER';
+    x.fillText(line, W / 2, 850);
+    if (LB.arguedLine) { x.fillStyle = '#cfe4ea'; x.font = '500 34px Inter, sans-serif'; x.fillText(LB.arguedLine, W / 2, 930); }
+    x.fillStyle = '#36e3c8'; x.beginPath(); x.roundRect(W / 2 - 300, 1130, 600, 96, 48); x.fill();
+    x.fillStyle = '#05231e'; x.font = '700 40px "Barlow Condensed", sans-serif'; x.fillText('OVERANDOUTGAME.COM', W / 2, 1193);
+    x.fillStyle = '#8aa0b0'; x.font = '700 24px "Barlow Condensed", sans-serif'; x.fillText('FREE  ·  SAME OVER FOR EVERYONE  ·  CAN YOU UMPIRE?', W / 2, 1280);
+    return new Promise(res => c.toBlob(res, 'image/png'));
+  }
+
+  /* ---------- the board: rank and streak on rows, and a Nations tab ---------- */
+  const tabs = E('bTabMonth').parentNode;
+  const natTab = document.createElement('button'); natTab.className = 'tab nat3'; natTab.id = 'bTabNations'; natTab.textContent = 'Nations';
+  tabs.appendChild(natTab);
+  natTab.onclick = () => lbOpen('nations');
+
+  const _lbFetch = lbFetch;
+  lbFetch = async function (mode) {
+    if (mode === 'nations') {
+      if (!LB.client) return [];
+      const since = new Date(Date.now() - 30 * 864e5); const p = n => (n < 10 ? '0' : '') + n;
+      const key = since.getFullYear() + '-' + p(since.getMonth() + 1) + '-' + p(since.getDate());
+      const res = await LB.client.rpc('nation_board', { p_since: key });
+      if (res.error) return res.error.code === '42883' || /PGRST202/.test(res.error.code || '') ? null : [];
+      return (res.data || []).map(r => ({ nation: r.nation, umpires: +r.umpires, overs: +r.overs, avg: +r.avg_score }));
+    }
+    if (!LB.retCol) return _lbFetch(mode);
+    // same queries as before, with rating and streak riding along
+    if (mode === 'today') {
+      const { data } = await LB.client.from('scores')
+        .select('score,grid,created_at,user_id,profiles(name,nation,rating,streak)')
+        .eq('day', lbDay()).order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
+      return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: r.score, grid: r.grid, overs: 1 }));
+    }
+    const since = new Date(Date.now() - 30 * 864e5); const p = n => (n < 10 ? '0' : '') + n;
+    const sinceKey = since.getFullYear() + '-' + p(since.getMonth() + 1) + '-' + p(since.getDate());
+    const { data } = await LB.client.from('scores').select('score,user_id,profiles(name,nation,rating,streak)').gte('day', sinceKey).limit(5000);
+    const tot = {};
+    for (const r of (data || [])) {
+      const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: 0, overs: 0 });
+      t.score += r.score; t.overs++;
+    }
+    return Object.values(tot).sort((a, b) => b.score - a.score || a.overs - b.overs);
+  };
+
+  lbPaintBoard = async function () {
+    E('bTabToday').className = 'tab' + (lbMode === 'today' ? ' on' : '');
+    E('bTabMonth').className = 'tab' + (lbMode === 'month' ? ' on' : '');
+    natTab.className = 'tab nat3' + (lbMode === 'nations' ? ' on' : '');
+    E('bTitle').textContent = lbMode === 'today' ? "TODAY'S OVER" : lbMode === 'month' ? 'LAST 30 DAYS' : 'NATION V NATION';
+    const list = E('bList'), me = E('bMe');
+    me.textContent = '';
+    if (!lbEnabled()) { list.innerHTML = '<div class="bNote">The leaderboard lives on the real site — this preview copy keeps scores to itself.</div>'; return; }
+    list.innerHTML = '<div class="bNote">Loading…</div>';
+    const rows = await lbFetch(lbMode);
+    if (lbMode === 'nations') {
+      if (rows === null) { list.innerHTML = '<div class="bNote">Nation v nation switches on shortly.</div>'; return; }
+      if (!rows.length) { list.innerHTML = '<div class="bNote">No nation has three umpires on the board yet. Recruit.</div>'; return; }
+      list.innerHTML = rows.slice(0, 25).map((r, i) => '<div class="bRow' + (LB.nation === r.nation ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bNat">' + esc(r.nation) + '</span><span class="bSub">' + r.umpires + ' umpires · ' + r.overs + ' overs</span><b>' + r.avg.toFixed(2) + '</b></div>').join('');
+      me.textContent = 'Average correct per over, last 30 days. Three umpires minimum.';
+      return;
+    }
+    if (!rows.length) { list.innerHTML = '<div class="bNote">Nobody has posted yet. Be first.</div>'; return; }
+    const myIdx = LB.user ? rows.findIndex(r => r.id === LB.user.id) : -1;
+    list.innerHTML = rows.slice(0, 25).map((r, i) => {
+      const mine = LB.user && r.id === LB.user.id;
+      const right = lbMode === 'today'
+        ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + r.score + '/6</b>'
+        : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + r.score + '</b>';
+      const rk = r.rating ? '<span class="rk" title="' + r.rating + '">' + band(r.rating) + '</span>' : '';
+      const fl = r.streak > 1 ? '<span class="fl">🔥' + r.streak + '</span>' : '';
+      return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bName">' + natPill(r.nation) + rk + esc(r.name) + fl + '</span>' + right + '</div>';
+    }).join('');
+    if (LB.user) me.textContent = myIdx < 0 ? (lbMode === 'today' ? "You haven't posted today's over yet." : 'No overs from you in the last 30 days.') : 'You are ' + ordinal(myIdx + 1) + ' of ' + rows.length + '.';
+  };
+
+  // the umpire card gets a stats line
+  const _lbPaintAuth = lbPaintAuth;
+  lbPaintAuth = function () {
+    _lbPaintAuth();
+    const card = E('bCard');
+    if (card && LB.user && !LB.editing) {
+      const s = streakNow(), r = ratingNow();
+      const div = document.createElement('div'); div.className = 'cStats';
+      div.innerHTML = '<span class="rk">' + band(r) + '</span><b>' + r + '</b> · 🔥 <b>' + s.n + '</b>-day streak' + (s.best > s.n ? ' (best ' + s.best + ')' : '');
+      card.appendChild(div);
+    }
+  };
+
+  /* ---------- the over card: the streak is the reason you are here ---------- */
+  function noteStreak() {
+    const n = E('ocNote'); if (!n) return;
+    const s = streakNow();
+    if (s.playedToday) return;
+    if (s.n > 0) n.textContent = '🔥 ' + s.n + '-day streak. Six balls to keep it alive.';
+  }
+  {
+    let tries = 0;
+    const iv = setInterval(() => { const oc = E('overCard'); if (oc && oc.style.display === 'block') { noteStreak(); clearInterval(iv); } if (++tries > 300) clearInterval(iv); }, 200);
+  }
+}
+</script>
