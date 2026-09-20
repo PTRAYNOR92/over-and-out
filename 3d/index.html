@@ -6858,7 +6858,8 @@ function polishGround() {
   #bCard .cStats b{color:var(--ink)}
   #board .tab.nat3{flex:1}
   .bRow .bNat{font:700 15px var(--label);color:var(--amber);width:44px}
-  .bRow .bSub{font-size:11px;color:var(--dim);flex:1}`;
+  .bRow .bSub{font-size:11px;color:var(--dim);flex:1}
+  .bRow .flag{color:#3a4c5c;font-size:13px;margin-left:8px;cursor:pointer;text-decoration:none} .bRow .flag:hover{color:var(--red)} .bRow .flag.done{color:var(--red)}`;
   document.head.appendChild(css);
 
   /* ---------- ranks ---------- */
@@ -6910,10 +6911,15 @@ function polishGround() {
   const _lbProfileRead = lbProfileRead;
   lbProfileRead = async function (id) {
     if (LB.retCol !== false) {
-      const r = await LB.client.from('profiles').select('name,nation,rating,streak,best_streak,last_day').eq('id', id).maybeSingle();
+      let r = null;
+      if (LB.modCol !== false) {
+        r = await LB.client.from('profiles').select('name,nation,rating,streak,best_streak,last_day,hidden').eq('id', id).maybeSingle();
+        if (!r.error) LB.modCol = true; else if (r.error.code === '42703') { LB.modCol = false; r = null; } else return r;
+      }
+      if (!r) r = await LB.client.from('profiles').select('name,nation,rating,streak,best_streak,last_day').eq('id', id).maybeSingle();
       if (!r.error) {
         LB.retCol = true; LB.natCol = true;
-        if (r.data) { LB.rating = r.data.rating; LB.streak = r.data.streak; LB.best = r.data.best_streak; LB.lastDay = r.data.last_day; }
+        if (r.data) { LB.rating = r.data.rating; LB.streak = r.data.streak; LB.best = r.data.best_streak; LB.lastDay = r.data.last_day; LB.hidden = !!r.data.hidden; }
         return r;
       }
       if (r.error.code !== '42703') return r;
@@ -7071,15 +7077,17 @@ function polishGround() {
     }
     if (!LB.retCol) return _lbFetch(mode);
     // same queries as before, with rating and streak riding along
+    const prof = LB.modCol ? 'profiles!inner(name,nation,rating,streak,hidden)' : 'profiles(name,nation,rating,streak)';
+    const unhidden = q => LB.modCol ? q.eq('profiles.hidden', false) : q;
     if (mode === 'today') {
-      const { data } = await LB.client.from('scores')
-        .select('score,grid,created_at,user_id,profiles(name,nation,rating,streak)')
-        .eq('day', lbDay()).order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
+      const { data } = await unhidden(LB.client.from('scores')
+        .select('score,grid,created_at,user_id,' + prof)
+        .eq('day', lbDay())).order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
       return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: r.score, grid: r.grid, overs: 1 }));
     }
     const since = new Date(Date.now() - 30 * 864e5); const p = n => (n < 10 ? '0' : '') + n;
     const sinceKey = since.getFullYear() + '-' + p(since.getMonth() + 1) + '-' + p(since.getDate());
-    const { data } = await LB.client.from('scores').select('score,user_id,profiles(name,nation,rating,streak)').gte('day', sinceKey).limit(5000);
+    const { data } = await unhidden(LB.client.from('scores').select('score,user_id,' + prof).gte('day', sinceKey)).limit(5000);
     const tot = {};
     for (const r of (data || [])) {
       const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: 0, overs: 0 });
@@ -7114,7 +7122,8 @@ function polishGround() {
         : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + r.score + '</b>';
       const rk = r.rating ? '<span class="rk" title="' + r.rating + '">' + band(r.rating) + '</span>' : '';
       const fl = r.streak > 1 ? '<span class="fl">🔥' + r.streak + '</span>' : '';
-      return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bName">' + natPill(r.nation) + rk + esc(r.name) + fl + '</span>' + right + '</div>';
+      const flag = (LB.user && !mine && LB.modCol) ? '<a class="flag" data-id="' + r.id + '" title="Report this name">⚑</a>' : '';
+      return '<div class="bRow' + (mine ? ' me' : '') + '" data-id="' + r.id + '"><i>' + (i + 1) + '</i><span class="bName">' + natPill(r.nation) + rk + esc(r.name) + fl + '</span>' + right + flag + '</div>';
     }).join('');
     if (LB.user) me.textContent = myIdx < 0 ? (lbMode === 'today' ? "You haven't posted today's over yet." : 'No overs from you in the last 30 days.') : 'You are ' + ordinal(myIdx + 1) + ' of ' + rows.length + '.';
   };
@@ -7143,5 +7152,156 @@ function polishGround() {
     let tries = 0;
     const iv = setInterval(() => { const oc = E('overCard'); if (oc && oc.style.display === 'block') { noteStreak(); clearInterval(iv); } if (++tries > 300) clearInterval(iv); }, 200);
   }
+}
+</script>
+<script>
+/* ============================================================
+   WAYS IN — play as a guest, continue with Google, or an email code; and a
+   report flag so a bad name can be hidden.
+
+   Guest = Supabase anonymous sign-in: a real account with no email, so the
+   board, streak and rating all work at once. Later they can add an email
+   (a six-digit code, no links) or link Google, and the account upgrades in
+   place — nothing lost. Needs three switches in Supabase (see the SQL file's
+   header). With no Supabase on the page nothing here shows.
+   ============================================================ */
+{
+  const css = document.createElement('style');
+  css.textContent = `
+  .ways{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+  .ways .wide{margin:0} .ways .ghost{margin:0}
+  .ways .or{font:700 9.5px var(--label);letter-spacing:2px;text-transform:uppercase;color:#3a4c5c;text-align:center;margin:2px 0}
+  .em{display:flex;gap:8px;align-items:stretch}
+  .em input{flex:1;min-width:0;box-sizing:border-box;padding:11px 12px;border-radius:8px;border:1px solid #2b5a8a;background:#0a1119;color:var(--ink);font:500 15px Inter,system-ui,sans-serif}
+  .em input.code{letter-spacing:6px;font-weight:700;text-align:center}
+  .em .ghost{width:auto;padding:0 14px;border-color:var(--teal);color:var(--teal);white-space:nowrap}
+  .authNote{font-size:12px;color:var(--dim);line-height:1.45;margin-top:6px}
+  .authNote.err{color:#ff6a5d}
+  #bCard .guest{font-size:12px;color:var(--dim);line-height:1.45;margin-top:8px;padding-top:8px;border-top:1px solid #17232e}
+  #bCard .guest b{color:#ffb35c}
+  #bCard .hiddenNote{font-size:12px;color:#ff6a5d;margin-top:8px}`;
+  document.head.appendChild(css);
+
+  const isGuest = () => !!(LB.user && LB.user.is_anonymous);
+  const rnd = () => 'Umpire ' + String(Math.floor(1000 + Math.random() * 9000));
+
+  // a guest gets a neutral name until they pick one
+  const _lbSetUser = lbSetUser;
+  lbSetUser = async function (user) {
+    if (user && user.is_anonymous && !(user.user_metadata && user.user_metadata.name)) {
+      user.user_metadata = Object.assign({}, user.user_metadata, { name: rnd() });
+    }
+    return _lbSetUser(user);
+  };
+
+  /* ---------- the three ways in ---------- */
+  async function asGuest() {
+    if (!LB.client) return;
+    setNote('Setting you up…');
+    const { error } = await LB.client.auth.signInAnonymously();
+    if (error) setNote(/disabled|not enabled|anonymous/i.test(error.message) ? 'Guest play switches on shortly — try Google or email.' : 'Could not start a guest account: ' + error.message, true);
+  }
+  function withGoogle() {
+    if (!LB.client) return;
+    LB.client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+  }
+  let pendingEmail = null;
+  async function sendCode(email, upgrade) {
+    email = (email || '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setNote('That does not look like an email address.', true); return false; }
+    setNote('Sending your code…');
+    let error;
+    if (upgrade) ({ error } = await LB.client.auth.updateUser({ email }));           // guest → real account, same id
+    else ({ error } = await LB.client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } }));
+    if (error) { setNote(/rate|limit/i.test(error.message) ? 'Too many codes sent — try again in a few minutes.' : error.message, true); return false; }
+    pendingEmail = email;
+    setNote('Check ' + email + ' for a six-digit code (and the junk folder).');
+    return true;
+  }
+  async function confirmCode(code, upgrade) {
+    code = (code || '').replace(/\D/g, '');
+    if (code.length < 6 || !pendingEmail) { setNote('Type the six digits from the email.', true); return; }
+    setNote('Checking…');
+    const { error } = await LB.client.auth.verifyOtp({ email: pendingEmail, token: code, type: upgrade ? 'email_change' : 'email' });
+    if (error) { setNote(/expired|invalid/i.test(error.message) ? 'That code is wrong or has expired — send another.' : error.message, true); return; }
+    setNote(upgrade ? 'Email added. Your streak and rating now follow you anywhere.' : 'Signed in.');
+    if (upgrade) { const { data } = await LB.client.auth.getUser(); if (data && data.user) LB.user = data.user; lbPaintAuth(); }
+  }
+  async function linkGoogle() {
+    if (!LB.client) return;
+    const { error } = await LB.client.auth.linkIdentity({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+    if (error) setNote(/manual linking|not enabled/i.test(error.message) ? 'Linking switches on shortly — add an email instead.' : error.message, true);
+  }
+  function setNote(t, err) { const n = E('authNote'); if (n) { n.textContent = t; n.className = 'authNote' + (err ? ' err' : ''); } }
+
+  const emailUI = (upgrade) =>
+    '<div class="em" id="emRow"><input id="emIn" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"><button class="ghost" id="emSend">Send code</button></div>' +
+    '<div class="em" id="cdRow" style="display:none"><input id="cdIn" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="······"><button class="ghost" id="cdGo">Confirm</button></div>' +
+    '<div class="authNote" id="authNote"></div>';
+  function wireEmail(upgrade) {
+    const send = async () => { if (await sendCode(E('emIn').value, upgrade)) { E('cdRow').style.display = 'flex'; E('cdIn').focus(); } };
+    E('emSend').onclick = send; E('emIn').onkeydown = e => { if (e.key === 'Enter') send(); };
+    E('cdGo').onclick = () => confirmCode(E('cdIn').value, upgrade); E('cdIn').onkeydown = e => { if (e.key === 'Enter') confirmCode(E('cdIn').value, upgrade); };
+  }
+
+  /* ---------- the session panel ---------- */
+  const _lbPaintAuth = lbPaintAuth;
+  lbPaintAuth = function () {
+    _lbPaintAuth();
+    if (!lbEnabled()) return;
+    const s = E('bSession');
+    if (!LB.user) {
+      const w = E('who'); if (w) w.textContent = 'JOIN THE BOARD';
+      s.innerHTML = '<div class="ways">'
+        + '<button class="wide gold" id="wGuest">Pick a name and play</button>'
+        + '<div class="or">or</div>'
+        + '<button class="ghost" id="wGoogle">Continue with Google</button>'
+        + '<button class="ghost" id="wEmail">Continue with email</button>'
+        + '<div id="wEmailBox" style="display:none">' + emailUI(false) + '</div>'
+        + '</div><div class="authNote">A name and a team go on the board — nothing else. Guests keep their streak on this device; add an email any time to keep it everywhere.</div>';
+      E('wGuest').onclick = asGuest;
+      E('wGoogle').onclick = withGoogle;
+      E('wEmail').onclick = () => { E('wEmailBox').style.display = 'block'; E('wEmail').style.display = 'none'; E('emIn').focus(); wireEmail(false); };
+      return;
+    }
+    const card = E('bCard');
+    if (card && LB.hidden) {
+      const h = document.createElement('div'); h.className = 'hiddenNote';
+      h.textContent = 'Your name was reported and is hidden from the board. Change it to come back.';
+      card.appendChild(h);
+    }
+    if (card && isGuest() && !LB.editing) {
+      const g = document.createElement('div'); g.className = 'guest';
+      g.innerHTML = '<b>Guest account</b> — your streak and rating live on this device only. '
+        + '<a id="gEmail">Add an email</a> or <a id="gGoogle">link Google</a> to keep them anywhere.'
+        + '<div id="gEmailBox" style="display:none;margin-top:8px">' + emailUI(true) + '</div>';
+      card.appendChild(g);
+      E('gEmail').onclick = () => { E('gEmailBox').style.display = 'block'; E('emIn').focus(); wireEmail(true); };
+      E('gGoogle').onclick = linkGoogle;
+    }
+  };
+
+  // every "sign in" tap opens the board with the three ways, instead of going straight to Google
+  lbSignIn = function () { if (!lbEnabled() || !LB.client) return; lbOpen(lbMode || 'today'); };
+
+  // the end-of-over button says what it does
+  const _lbOnOverEnd = lbOnOverEnd;
+  lbOnOverEnd = async function (right, grid, bowler) {
+    await _lbOnOverEnd(right, grid, bowler);
+    const b = E('pIn'); if (b) b.textContent = 'Post ' + right + '/6 to the board';
+  };
+
+  /* ---------- reporting a name ---------- */
+  document.addEventListener('click', async e => {
+    const a = e.target.closest && e.target.closest('.flag'); if (!a || !LB.client || !LB.user) return;
+    e.preventDefault();
+    if (a.classList.contains('done')) return;
+    if (!confirm('Report this name as offensive? Three reports hide it from the board.')) return;
+    const { data, error } = await LB.client.rpc('report_name', { p_target: a.dataset.id });
+    if (error) { a.title = 'Could not report: ' + error.message; return; }
+    a.classList.add('done'); a.title = 'Reported';
+    if (data && data.hidden) lbPaintBoard();
+  });
+
 }
 </script>
