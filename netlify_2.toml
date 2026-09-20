@@ -1,0 +1,26 @@
+# Tells Netlify how to publish this site.
+# There's no build step — the files are served exactly as they are.
+
+[build]
+  publish = "."
+
+# The front door IS the game. overandoutgame.com serves 3d/index.html directly
+# (a rewrite, so the address stays overandoutgame.com); /3d/ keeps working for
+# old links. `force` is needed because a root index.html also exists.
+[[redirects]]
+  from = "/"
+  to = "/3d/index.html"
+  status = 200
+  force = true
+
+# Always re-check HTML pages so nobody is stuck on yesterday's game after an
+# update. (Applies to the root and every .html, including 3d/index.html.)
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
