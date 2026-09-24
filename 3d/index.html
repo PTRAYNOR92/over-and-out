@@ -74,6 +74,8 @@
   #summary{text-align:center}
   #summary h2{font:400 15px var(--display);letter-spacing:2px;color:var(--dim);margin:0 0 6px}
   #score{font:400 52px/1 var(--display);color:var(--teal);letter-spacing:1px}
+  #score small.of{font:700 15px var(--label);letter-spacing:1.5px;color:var(--dim);margin-left:4px}
+  .bRow b{width:auto;min-width:34px}
   #scoreSub{font-size:12.5px;color:var(--dim);margin:6px 0 10px}
   #grid{font-size:24px;letter-spacing:3px;margin-bottom:4px}
   #bowlerOut{font:700 9.5px var(--label);letter-spacing:1.6px;text-transform:uppercase;color:#7fd8c8;margin-bottom:11px}
@@ -3446,16 +3448,22 @@ three/build/three.module.js:
 
   // a challenge: day(8)-score-grid(6)-name
   var parseCh = function (raw) {
-    var mm = /^(\d{8})-([0-6])-([01x]{6})(?:-(.{1,40}))?$/.exec(raw || '');
+    var mm = /^(\d{8})-([0-6])-([01x]{6})(?:-p(\d{1,4}))?(?:-(.{1,40}))?$/.exec(raw || '');
     if (!mm) return null;
     var name = '';
-    try { name = decodeURIComponent(mm[4] || ''); } catch (e) { name = ''; }
+    try { name = decodeURIComponent(mm[5] || ''); } catch (e) { name = ''; }
     name = name.replace(/[^\p{L}\p{N} .'_-]/gu, '').trim().slice(0, 16);
-    return { day: mm[1].slice(0, 4) + '-' + mm[1].slice(4, 6) + '-' + mm[1].slice(6, 8), score: +mm[2], grid: mm[3], name: name };
+    return { day: mm[1].slice(0, 4) + '-' + mm[1].slice(4, 6) + '-' + mm[1].slice(6, 8), score: +mm[2], grid: mm[3], name: name,
+             points: mm[4] ? Math.min(6000, +mm[4]) : null };
   };
   var ch = parseCh(q.get('c'));
   if (ch) { sset('oo3d:ch', q.get('c')); G.chFresh = true; } else ch = parseCh(sget('oo3d:ch'));
   G.ch = ch;
+
+  // a league invite: ?l=CODE. Kept in localStorage so it survives a Google sign-in round trip.
+  var lg = clean(q.get('l'), 8);
+  if (lg) { lset('oo3d:league', lg.toUpperCase()); G.leagueFresh = true; }
+  G.league = clean(lget('oo3d:league'), 8);
 
   // a streak carried out of an in-app browser: n-best-last(8)-rating
   var k = /^(\d{1,3})-(\d{1,3})-(\d{8})-(\d{3,4})$/.exec(q.get('k') || '');
@@ -3471,7 +3479,7 @@ three/build/three.module.js:
   // tidy the address bar, so a copied address doesn't carry someone else's tags
   try {
     var had = false;
-    ['r', 's', 'c', 'k'].forEach(function (key) { if (q.has(key)) { q.delete(key); had = true; } });
+    ['r', 's', 'c', 'k', 'l'].forEach(function (key) { if (q.has(key)) { q.delete(key); had = true; } });
     if (had && history.replaceState) {
       var rest = q.toString();
       history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
@@ -4334,7 +4342,8 @@ function rememberResult(right, grid, bowler) {
   if (!isDaily() || practice) return null;
   const have = lsGet(resultKey());
   if (have) return have;                    // the first over of the day stands
-  const r = { day: lbDay(), score: right, grid, bowler, at: Date.now(), posted: false };
+  const r = { day: lbDay(), score: right, grid, bowler, at: Date.now(), posted: false,
+    points: pointsOn() ? overPoints() : null, delta: LB.pendingDelta };
   lsSet(resultKey(), r);
   return r;
 }
@@ -4468,9 +4477,10 @@ async function lbPost(r) {
   try {
     /* Insert, and swallow the duplicate: the table has one row per player per
        day, so a second attempt from another device simply does not count. */
-    const { error } = await LB.client.from('scores').insert({
-      user_id: LB.user.id, day: r.day, score: r.score, grid: r.grid, bowler: r.bowler || null
-    });
+    const row = { user_id: LB.user.id, day: r.day, score: r.score, grid: r.grid, bowler: r.bowler || null };
+    if (r.points !== null && r.points !== undefined) row.points = r.points;
+    let { error } = await LB.client.from('scores').insert(row);
+    if (error && error.code === '42703' && row.points !== undefined) { delete row.points; ({ error } = await LB.client.from('scores').insert(row)); }
     if (error && error.code !== '23505') throw error;
     r.posted = true; lsSet(resultKey(), r);
     return true;
@@ -4526,8 +4536,8 @@ async function lbPaintBoard() {
   list.innerHTML = rows.slice(0, 25).map((r, i) => {
     const mine = LB.user && r.id === LB.user.id;
     const right = lbMode === 'today'
-      ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + r.score + '/6</b>'
-      : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + r.score + '</b>';
+      ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + (r.points != null ? fmtPts(r.points) : r.score + '/6') + '</b>'
+      : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + (r.points ? fmtPts(r.points) : r.score) + '</b>';
     return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bName">' + natPill(r.nation) + esc(r.name) + '</span>' + right + '</div>';
   }).join('');
   if (LB.user) {
@@ -4589,7 +4599,7 @@ async function lbOnOverEnd(right, grid, bowler) {
     if (!counted || !lsGet(key)) {
       const s = lsGet('oo3d:streak');
       lbTrack('over', { score: right, practice: !counted, signed_in: !!LB.user,
-        __g: counted ? { prev_day: s && s.last ? s.last : null, is_new: !s } : {} });
+        __g: counted ? Object.assign({ prev_day: s && s.last ? s.last : null, is_new: !s }, pointsOn() ? { points: overPoints() } : {}) : {} });
       if (counted) lsSet(key, 1);
     }
   }
@@ -5216,6 +5226,7 @@ function makeDelivery(B, forceLen, big) {
      which is where most "pitched outside leg" reprieves come from. */
   const bias = B.around ? (B.hand === 'right' ? 0.110 : -0.085) : 0;
   const spice = varietyOn();
+  const hard = hardOn();
   const px = aimRough ? rnd(ROUGH.x0 + 0.05, ROUGH.x1 - 0.05)
     : rng() < (spice ? 0.20 : 0.12)
       ? rnd(0.06, 0.34)                                  // a deliberate leg-side line
@@ -5241,15 +5252,15 @@ function makeDelivery(B, forceLen, big) {
   const offCrack = nearCrack(px, pz);
   let dev = type === 'spin'
     ? (straightOn ? gauss() * 0.06
-                  : B.turnSgn * (rng() < (spice ? 0.42 : 0.30) ? rnd(0.48, spice ? 1.15 : 1.00) : rnd(0.16, 0.46)))
-    : (rng() < (spice ? 0.28 : 0.20) ? B.swingSgn * rnd(0.20, spice ? 0.52 : 0.46) : gauss() * 0.085);
+                  : B.turnSgn * (rng() < (hard ? 0.52 : spice ? 0.42 : 0.30) ? rnd(0.48, hard ? 1.25 : spice ? 1.15 : 1.00) : rnd(0.16, 0.46)))
+    : (rng() < (hard ? 0.36 : spice ? 0.28 : 0.20) ? B.swingSgn * rnd(0.20, hard ? 0.58 : spice ? 0.52 : 0.46) : gauss() * 0.085);
   if (inRough) dev *= type === 'spin' ? rnd(1.5, 2.2) : rnd(1.2, 1.6);
   if (big && type === 'spin') dev = B.turnSgn * rnd(0.95, 1.45) * (inRough ? 1.15 : 1);   // the ripper
 
   /* Swing through the air. This is the shape of the flight, not the landing
      point: the ball leaves on one line and arrives on another. */
   let swing = type === 'spin' ? rnd(-0.10, 0.10)
-              : B.swingSgn * (rng() < (spice ? 0.52 : 0.42) ? rnd(0.58, spice ? 1.45 : 1.20) : rnd(0.08, 0.46));
+              : B.swingSgn * (rng() < (hard ? 0.62 : spice ? 0.52 : 0.42) ? rnd(0.58, hard ? 1.60 : spice ? 1.45 : 1.20) : rnd(0.08, 0.46));
   if (big && type !== 'spin') { swing = B.swingSgn * rnd(1.25, 1.75); if (Math.abs(dev) < 0.18) dev = B.swingSgn * rnd(0.18, 0.36); }   // the hooper
 
   // does he play at it? leaving is rarer than playing
@@ -5436,6 +5447,57 @@ function classify(d) {
     'Pitched in line, struck in line, hitting the stumps.';
 }
 
+/* HARDER OVERS (from HARD_FROM, and every practice over).
+   The crowd numbers from 20–24 Sep said the over was too easy in one specific
+   way: the balls 98–99% of people got right were not-outs missing by 20–55cm
+   (mostly sliding miles down leg) or sailing well over. Outs were never that
+   easy. So from HARD_FROM:
+   - ball 1 is the one to get your eye in — a fair, readable decision;
+   - balls 2–6 must be close: a not-out may miss by at most 15cm, or 22cm if it
+     swung or turned a long way to get there (that is what fools people — the
+     26% ball on 24 Sep was a big away-swinger missing by 25cm); an out must be
+     within 9cm of not being out on its tightest count;
+   - more big swing and more big turn from every bowler.
+   Nothing about any over before HARD_FROM changes. */
+const HARD_FROM = '2026-09-25';
+function hardOn() { return SEED_KEY >= HARD_FROM || practice; }
+/* POINTS. Up to 1,000 a ball: 1,000 for a right call the instant the ball hits
+   him, falling in a straight line to 400 as the three-second bar runs out.
+   Wrong, or no call, is 0. Max 6,000. One point is five milliseconds, so two
+   people finishing level is rare. The bar shows no number (Pat: it is stressful
+   enough); the points appear with the verdict. */
+function pointsOn() { return hardOn(); }
+const pointsFor = ms => Math.round(1000 - 600 * clamp(ms, 0, APPEAL_MS) / APPEAL_MS);
+const overPoints = () => ballPts.reduce((a, b) => a + (b || 0), 0);
+const fmtPts = n => String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+/* How obvious a verdict is, in metres. A not-out is as obvious as its most
+   glaring reason (pitched outside leg by, struck outside off playing a shot by,
+   missing by, over by). An out is as obvious as its tightest condition. */
+function clarityOf(d) {
+  const legP = d.px - HALF_W, offI = -HALF_W - d.ix, missX = Math.abs(d.sx) - HALF_W, overY = d.sy - STUMP_H;
+  if (d.truth === 'notout') {
+    let c = 0;
+    if (legP > 0) c = Math.max(c, legP);
+    if (offI > 0 && d.shot) c = Math.max(c, offI);
+    if (missX > 0) c = Math.max(c, missX);
+    if (overY > 0) c = Math.max(c, overY);
+    return c;
+  }
+  return Math.min(-legP, -missX, -overY, d.shot ? -offI : Infinity);
+}
+function bigMover(d) {
+  return Math.abs(d.swing) > 0.9 || Math.abs(d.dev) > (d.type === 'spin' ? 0.75 : 0.38);
+}
+function fitsHard(d, n, i) {
+  const c = clarityOf(d);
+  if (n === 0) return d.truth === 'out' ? c >= 0.05 : c >= 0.18;     // the eye-in ball
+  /* A tight out is preferred, but a plumb one is allowed late in the search:
+     outs were never the easy ones, and without this the over drifts to 60%
+     not-out, which is a free hint. The not-out limit never relaxes. */
+  if (d.truth === 'out') return c <= 0.09 || i >= 360;
+  return c <= (bigMover(d) ? 0.22 : 0.15);
+}
+
 /* Each ball is physically honest, but WHICH ball you get is curated — the same
    way a real over is a bowler trying things, not a random sample of the
    universe. Without this you get an over that is 70% "not out" and therefore
@@ -5455,6 +5517,7 @@ function buildOver(B) {
   const balls = [], recent = [];
   let yorkers = 0, cracks = 0;
   const VARIETY = SEED_KEY > '2026-09-19' || practice;
+  const HARD = hardOn(), S = HARD ? 1.75 : 1;     // a longer search, because it is pickier
   const kinds = { F: 0, B: 0, L: 0 };
   const kindOf = d => d.shot ? (d.forward ? 'F' : 'B') : 'L';
   const shots = {};
@@ -5470,14 +5533,15 @@ function buildOver(B) {
       want = want === 'out' ? 'notout' : 'out';
     }
     let fallback = null, chosen = null;
-    for (let i = 0; i < 400 && !chosen; i++) {
+    for (let i = 0; i < 400 * S && !chosen; i++) {
       // hold the length for most of the search; let it go only if that length
       // genuinely cannot give this verdict
-      const d = makeDelivery(B, i < 300 ? len : undefined, marquee.includes(n));
+      const d = makeDelivery(B, i < 300 * S ? len : (HARD && yorkers >= 1 ? ['GOOD', 'FULL', 'SHORT'][i % 3] : undefined), marquee.includes(n));
       if (!d.reachable) continue;
-      if (d.offCrack && cracks >= 2 && i < 380) continue;   // two off the cracks in an over is plenty
-      if (VARIETY && i < 350 && kinds[kindOf(d)] >= 3) continue;   // six back-foot shots is not an over
-      if (VARIETY && i < 330 && (shots[shotOf(d)] || 0) >= 2) continue;   // and not the same shot three times
+      if (d.offCrack && cracks >= 2 && i < 380 * S) continue;   // two off the cracks in an over is plenty
+      if (VARIETY && i < 350 * S && kinds[kindOf(d)] >= 3) continue;   // six back-foot shots is not an over
+      if (VARIETY && i < 330 * S && (shots[shotOf(d)] || 0) >= 2) continue;   // and not the same shot three times
+      if (HARD && i < 620 && !fitsHard(d, n, i)) continue;                       // close calls only, after the first
       if (!fallback) fallback = d;
       if (d.truth === want) chosen = d;
     }
@@ -5560,6 +5624,7 @@ let results = [];
 let d = null, phase = 'idle', t0 = 0, call = null, raf = 0;
 let appealLeft = 0, lastNow = 0;
 const APPEAL_MS = 3000;
+let callMs = null, ballPts = [];
 const E = id => document.getElementById(id);
 
 function setPhase(p) {
@@ -5574,7 +5639,8 @@ function setPhase(p) {
 }
 
 function paintScore() {
-  E('count').textContent = 'BALL ' + Math.min(ballIdx + 1, BALLS_PER_OVER) + ' / ' + BALLS_PER_OVER;
+  E('count').textContent = 'BALL ' + Math.min(ballIdx + 1, BALLS_PER_OVER) + ' / ' + BALLS_PER_OVER +
+    (pointsOn() && results.length ? ' · ' + fmtPts(overPoints()) : '');
   E('pips').innerHTML = over.map((_, i) => {
     const r = results[i];
     const cls = r === undefined ? 'p' : r === 'right' ? 'p ok' : 'p no';
@@ -5596,7 +5662,7 @@ function bowl() {
 
   clearTrack();
   resetCamera();
-  call = null;
+  call = null; callMs = null;
   E('readout').textContent = '';
   ball.visible = false; ballShadow.visible = false;
   impactRing.visible = false;
@@ -5633,8 +5699,15 @@ function onImpact() {
   setPhase('appeal');
 }
 
-function decide(c) {
+function decide(c, ev) {
   if (phase !== 'appeal') return;
+  /* How long into the three seconds the call came. The bar's clock runs on
+     frames (capped at 60ms a frame so a struggling phone does not lose time);
+     the tap is placed on that same clock by the event's own timestamp, so a
+     30fps phone is not rounded to its frames and a 60fps one given the edge. */
+  const pn = performance.now();
+  const tNow = (ev && ev.timeStamp > 0 && ev.timeStamp <= pn + 1) ? ev.timeStamp : pn;
+  callMs = clamp(APPEAL_MS - appealLeft + clamp(tNow - lastNow, 0, 60), 0, APPEAL_MS);
   call = c;
   t0 = performance.now();
   drawTrack();
@@ -5644,12 +5717,14 @@ function decide(c) {
 function finish() {
   const correct = call === d.truth;
   results[ballIdx] = correct ? 'right' : 'wrong';
+  const pts = correct && callMs !== null ? pointsFor(callMs) : 0;
+  ballPts[ballIdx] = pts;
   const words = { out: 'OUT', notout: 'NOT OUT' };
   E('verdict').textContent = words[d.truth];
   E('verdict').className = 'v ' + d.truth;
   E('yours').textContent =
     call === null ? 'No decision — that goes down as not out.' :
-    (correct ? '✓ Correct' : '✗ Wrong') + (d.tight ? ' · that was a whisker' : '');
+    (correct ? '✓ Correct' : '✗ Wrong') + (pointsOn() && correct ? ' · +' + pts : '') + (d.tight ? ' · that was a whisker' : '');
   E('yours').style.color = correct ? '#3ad17f' : '#ff6a5d';
   E('why').textContent = d.reason;
   E('boxes').innerHTML =
@@ -5665,12 +5740,22 @@ const box = (l, v, c) => '<div class="bx"><span>' + l + '</span><b class="' + c 
 const FACE = { right: '🟩', wrong: '🟥' };
 function endOver() {
   const right = results.filter(r => r === 'right').length;
+  const tot = overPoints();
+  if (pointsOn()) {
+    E('score').innerHTML = fmtPts(tot) + '<small class="of"> / 6,000</small>';
+    E('scoreSub').textContent = right + ' of 6 right · ' + (
+      tot >= 5200 ? 'Elite panel stuff.' :
+      tot >= 4400 ? 'That is an international standard over.' :
+      tot >= 3000 ? 'Solid. A couple you will want back.' :
+                    'Long afternoon in the middle.');
+  } else {
   E('score').textContent = right + '/' + BALLS_PER_OVER;
   E('scoreSub').textContent =
     right === 6 ? 'A perfect over. Elite panel stuff.' :
     right >= 5 ? 'That is an international standard over.' :
     right >= 3 ? 'Solid. A couple you will want back.' :
                  'Long afternoon in the middle.' ;
+  }
   E('grid').textContent = results.map(r => FACE[r] || '⬛').join('');
   E('bowlerOut').textContent = BOWLER.label;
   const grid = results.map(r => FACE[r] || '⬛').join('');
@@ -5873,7 +5958,7 @@ E('again').onclick = () => {
   let tries = 0;
   do { BOWLER = makeBowler(); } while (BOWLER.style === was && ++tries < 30);
   over = buildOver(BOWLER);
-  ballIdx = 0; results = [];
+  ballIdx = 0; results = []; ballPts = [];
   E('bowlerBar').textContent = BOWLER.label;
   E('shareBox').style.display = 'none';
   setFieldFor(BOWLER.style);
@@ -5887,11 +5972,13 @@ E('bClose').onclick = lbClose;
 E('bTabToday').onclick = () => lbOpen('today');
 E('bTabMonth').onclick = () => lbOpen('month');
 lbInit();
-E('out').onclick = () => decide('out');
-E('not').onclick = () => decide('notout');
+E('out').onclick = e => decide('out', e);
+E('not').onclick = e => decide('notout', e);
+E('out').addEventListener('pointerdown', e => decide('out', e));
+E('not').addEventListener('pointerdown', e => decide('notout', e));
 addEventListener('keydown', e => {
-  if (e.key === 'o') decide('out');
-  else if (e.key === 'n') decide('notout');
+  if (e.key === 'o') decide('out', e);
+  else if (e.key === 'n') decide('notout', e);
   else if (e.key === ' ') {
     if (phase === 'idle') bowl();
     else if (phase === 'verdict') E('next').click();
@@ -6807,7 +6894,9 @@ function polishGround() {
   #overCard .ocPace{display:inline-block;margin-top:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;font:700 11px var(--label);letter-spacing:1.6px;text-transform:uppercase;color:#cdd8e0}
   #overCard .ocBlurb{font-size:13px;line-height:1.5;color:#b9c6d0;margin:14px 6px 16px}
   #overCard .wide{margin-top:2px}
-  #overCard .ocNote{font-size:11px;color:#5f7484;margin-top:10px;line-height:1.4}`;
+  #overCard .ocNote{font-size:11px;color:#5f7484;margin-top:10px;line-height:1.4}
+  #overCard .ocRule{font-size:12.5px;line-height:1.45;color:#cfe4ea;margin:-4px 4px 14px;padding:9px 10px;border-radius:10px;background:rgba(54,227,200,.07);border:1px solid rgba(54,227,200,.25)}
+  #overCard .ocRule:empty{display:none} #overCard .ocRule b{color:var(--teal)}`;
   document.head.appendChild(css);
 
   const el = document.createElement('div');
@@ -6815,7 +6904,7 @@ function polishGround() {
   el.innerHTML = '<div class="oc"><div class="ocKick" id="ocKick"></div><div class="ocDate" id="ocDate"></div>' +
     '<div class="ocName" id="ocName"></div><div class="ocStyle" id="ocStyle"></div><div class="ocSide" id="ocSide"></div>' +
     '<div><span class="ocPace" id="ocPace"></span></div><div class="ocBlurb" id="ocBlurb"></div>' +
-    '<button class="wide" id="ocGo">Take the field ▶</button><div class="ocNote" id="ocNote"></div></div>';
+    '<div class="ocRule" id="ocRule"></div><button class="wide" id="ocGo">Take the field ▶</button><div class="ocNote" id="ocNote"></div></div>';
   document.body.appendChild(el);
 
   /* No names (Pat: fake names don't land) — a descriptor of what he is,
@@ -6892,6 +6981,7 @@ function polishGround() {
     E('ocSide').textContent = t.side;
     E('ocPace').textContent = t.pace;
     E('ocBlurb').textContent = t.blurb;
+    E('ocRule').innerHTML = pointsOn() ? 'Up to <b>1,000 points</b> a ball. Call it right quickly and you score more — the bar is three seconds. Wrong scores nothing.' : '';
     E('ocNote').textContent = 'Six balls. One look at each. Call it before the umpire at the other end does.';
     el.style.display = 'block';
     E('bowlerBar').textContent = t.name.replace(/^The /, '') + ' · ' + t.style + (B.around ? ' · round the wicket' : '');
@@ -7062,7 +7152,13 @@ function polishGround() {
     if (!LB.user || !LB.client) return false;
     if (LB.retCol !== false) {
       try {
-        const res = await LB.client.rpc('post_over', { p_day: r.day, p_score: r.score, p_grid: r.grid, p_bowler: r.bowler || null, p_delta: r.delta || 0 });
+        const args = { p_day: r.day, p_score: r.score, p_grid: r.grid, p_bowler: r.bowler || null, p_delta: r.delta || 0 };
+        if (r.points !== null && r.points !== undefined) args.p_points = r.points;
+        let res = await LB.client.rpc('post_over', args);
+        // the v17 SQL not run yet: the old function has no points argument
+        if (res.error && args.p_points !== undefined && /PGRST202|42883|not find|does not exist/i.test(res.error.message + res.error.code)) {
+          delete args.p_points; res = await LB.client.rpc('post_over', args);
+        }
         if (!res.error) {
           const j = res.data || {};
           LB.streak = j.streak; LB.best = j.best; LB.rating = j.rating; LB.lastDay = r.day;
@@ -7082,6 +7178,7 @@ function polishGround() {
   endOver = function () {
     const daily = isDaily() && !practice;
     const delta = daily ? overDelta() : 0;
+    LB.pendingDelta = delta;
     _endOver();
     if (daily) {
       const r = lsGet(resultKey());
@@ -7089,8 +7186,9 @@ function polishGround() {
       localBump(lbDay(), delta);
       LB.lastDelta = delta;
     }
+    LB.rankPct = null; LB.fooledLine = null;
     paintRetain(daily ? delta : null);
-    if (daily) argued();
+    if (daily) { argued(); rankOf(); }
   };
 
   let retainEl = null, arguedEl = null;
@@ -7103,17 +7201,43 @@ function polishGround() {
     if (delta === null) { retainEl.innerHTML = 'Practice over · nothing counted'; return; }
     const s = streakNow(), r = ratingNow(), dl = delta === undefined ? LB.lastDelta : delta;
     const dTxt = dl === undefined ? '' : ' <span class="' + (dl >= 0 ? 'up' : 'dn') + '">' + (dl >= 0 ? '+' : '') + dl + '</span>';
-    retainEl.innerHTML = '🔥 <b>' + s.n + '</b>-day streak' + (s.best > s.n ? ' · best ' + s.best : '') +
+    retainEl.innerHTML = (LB.rankPct != null ? 'Better than <b>' + LB.rankPct + '%</b> of umpires today<br>' : '') +
+      '🔥 <b>' + s.n + '</b>-day streak' + (s.best > s.n ? ' · best ' + s.best : '') +
       '<br>' + '<span class="rk">' + band(r) + '</span><b>' + r + '</b>' + dTxt;
     shareText = shareLine();
   }
+  const shortDay = k => { const d = new Date(k + 'T12:00:00'); return isNaN(d) ? k : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + ' ' + d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]; };
   function shareLine() {
     const right = results.filter(x => x === 'right').length, grid = results.map(x => ({ right: '🟩', wrong: '🟥' }[x] || '⬛')).join('');
     const s = streakNow(), r = ratingNow();
+    /* v17: the share is a score to beat. The points, where they sit against
+       everyone who played today, and the ball that fooled the most people —
+       the thing a mate reads and thinks "I'd have got that". */
+    if (pointsOn()) {
+      const daily = isDaily() && !practice;
+      let t = 'Over & Out 🏏 ' + (daily ? shortDay(SEED_KEY) : 'practice over') + '\n' + grid + '  ' + fmtPts(overPoints()) + ' pts';
+      if (daily && LB.rankPct != null && LB.rankPct >= 50) t += '\nBetter than ' + LB.rankPct + '% of umpires today';
+      if (daily && LB.fooledLine) t += '\n' + LB.fooledLine;
+      if (daily && s.n >= 2) t += '\n🔥 ' + s.n + '-day streak';
+      return t + '\noverandoutgame.com';
+    }
     let t = 'Over & Out — ' + SEED_KEY + '\n' + grid + '  ' + right + '/' + BALLS_PER_OVER;
     if (isDaily() && !practice) t += '\n🔥 ' + s.n + '-day streak · ' + band(r) + ' umpire';
     if (LB.arguedLine) t += '\n' + LB.arguedLine;
     return t + '\noverandoutgame.com';
+  }
+
+  // where today's points sit among everyone who finished the over (board or not)
+  async function rankOf() {
+    if (!pointsOn() || !lbEnabled() || !LB.client) return;
+    try {
+      const res = await LB.client.rpc('day_rank', { p_day: lbDay(), p_points: overPoints() });
+      if (res.error || !res.data) return;
+      const t = +res.data.total || 0, below = +res.data.below || 0;
+      if (t < 20) return;
+      LB.rankPct = Math.min(99, Math.round(100 * below / t));
+      paintRetain();
+    } catch (e) { /* never in the way */ }
   }
 
   // the ball that split the umpires closest to 50/50, once ten have called it
@@ -7129,6 +7253,14 @@ function polishGround() {
         const split = Math.abs(+row.outs / all - 0.5);
         if (!best || split < best.split) best = { ball: +row.ball, outs: +row.outs, notouts: +row.notouts, all, split };
       }
+      // and the one that fooled the most people, for the share
+      let fool = null;
+      for (const row of res.data) {
+        const all = +row.outs + +row.notouts, dd = over[+row.ball - 1]; if (all < 10 || !dd) continue;
+        const wrong = (dd.truth === 'out' ? +row.notouts : +row.outs) / all;
+        if (!fool || wrong > fool.wrong) fool = { ball: +row.ball, wrong };
+      }
+      if (fool && fool.wrong >= 0.2) { LB.fooledLine = 'Ball ' + fool.ball + ' fooled ' + Math.round(fool.wrong * 100) + '% of umpires'; shareText = shareLine(); }
       if (!best) return;
       const d = over[best.ball - 1], pctOut = Math.round(100 * best.outs / best.all);
       const mine = results[best.ball - 1];
@@ -7170,7 +7302,10 @@ function polishGround() {
     x.fillText('THE DAILY LBW OVER  ·  ' + SEED_KEY.toUpperCase(), W / 2, 240);
     x.fillStyle = '#7fd8c8'; x.font = '700 28px "Barlow Condensed", sans-serif';
     x.fillText((E('bowlerBar').textContent || BOWLER.label).toUpperCase(), W / 2, 290);
-    x.fillStyle = '#36e3c8'; x.font = '400 300px Anton, sans-serif'; x.fillText(right + '/6', W / 2, 600);
+    if (pointsOn()) {
+      x.fillStyle = '#36e3c8'; x.font = '400 250px Anton, sans-serif'; x.fillText(fmtPts(overPoints()), W / 2, 570);
+      x.fillStyle = '#8aa0b0'; x.font = '700 34px "Barlow Condensed", sans-serif'; x.fillText('OUT OF 6,000  ·  ' + right + ' OF 6 RIGHT', W / 2, 625);
+    } else { x.fillStyle = '#36e3c8'; x.font = '400 300px Anton, sans-serif'; x.fillText(right + '/6', W / 2, 600); }
     // the six squares
     const sq = 92, gap = 22, total = 6 * sq + 5 * gap; let sx = W / 2 - total / 2;
     for (let i = 0; i < 6; i++) {
@@ -7178,9 +7313,10 @@ function polishGround() {
       x.beginPath(); x.roundRect(sx + i * (sq + gap), 660, sq, sq, 16); x.fill();
     }
     x.fillStyle = '#eaf1f6'; x.font = '700 40px "Barlow Condensed", sans-serif';
-    let line = (isDaily() && !practice) ? '🔥 ' + s.n + '-DAY STREAK   ·   ' + band(r).toUpperCase() + ' UMPIRE  ' + r : 'PRACTICE OVER';
+    let line = (isDaily() && !practice) ? (pointsOn() && LB.rankPct != null && LB.rankPct >= 50 ? 'BETTER THAN ' + LB.rankPct + '% OF UMPIRES TODAY' : '🔥 ' + s.n + '-DAY STREAK   ·   ' + band(r).toUpperCase() + ' UMPIRE  ' + r) : 'PRACTICE OVER';
     x.fillText(line, W / 2, 850);
-    if (LB.arguedLine) { x.fillStyle = '#cfe4ea'; x.font = '500 34px Inter, sans-serif'; x.fillText(LB.arguedLine, W / 2, 930); }
+    const sub = pointsOn() ? LB.fooledLine : LB.arguedLine;
+    if (sub) { x.fillStyle = '#cfe4ea'; x.font = '500 34px Inter, sans-serif'; x.fillText(sub, W / 2, 930); }
     x.fillStyle = '#36e3c8'; x.beginPath(); x.roundRect(W / 2 - 300, 1130, 600, 96, 48); x.fill();
     x.fillStyle = '#05231e'; x.font = '700 40px "Barlow Condensed", sans-serif'; x.fillText('OVERANDOUTGAME.COM', W / 2, 1193);
     x.fillStyle = '#8aa0b0'; x.font = '700 24px "Barlow Condensed", sans-serif'; x.fillText('FREE  ·  SAME OVER FOR EVERYONE  ·  CAN YOU UMPIRE?', W / 2, 1280);
@@ -7207,21 +7343,29 @@ function polishGround() {
     // same queries as before, with rating and streak riding along
     const prof = LB.modCol ? 'profiles!inner(name,nation,rating,streak,hidden)' : 'profiles(name,nation,rating,streak)';
     const unhidden = q => LB.modCol ? q.eq('profiles.hidden', false) : q;
+    /* Points (from HARD_FROM) rank first; rows from before have none and sort
+       after on their right-count. Until the v17 SQL adds the column, the
+       query without it runs instead. */
+    const withPts = LB.ptsCol !== false;
     if (mode === 'today') {
-      const { data } = await unhidden(LB.client.from('scores')
-        .select('score,grid,created_at,user_id,' + prof)
-        .eq('day', lbDay())).order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
-      return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: r.score, grid: r.grid, overs: 1 }));
+      let q = unhidden(LB.client.from('scores')
+        .select('score,' + (withPts ? 'points,' : '') + 'grid,created_at,user_id,' + prof)
+        .eq('day', lbDay()));
+      if (withPts) q = q.order('points', { ascending: false, nullsFirst: false });
+      const { data, error } = await q.order('score', { ascending: false }).order('created_at', { ascending: true }).limit(200);
+      if (error && error.code === '42703' && withPts) { LB.ptsCol = false; return lbFetch(mode); }
+      return (data || []).map(r => ({ id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: r.score, points: r.points === undefined ? null : r.points, grid: r.grid, overs: 1 }));
     }
     const since = new Date(Date.now() - 30 * 864e5); const p = n => (n < 10 ? '0' : '') + n;
     const sinceKey = since.getFullYear() + '-' + p(since.getMonth() + 1) + '-' + p(since.getDate());
-    const { data } = await unhidden(LB.client.from('scores').select('score,user_id,' + prof).gte('day', sinceKey)).limit(5000);
+    const { data, error } = await unhidden(LB.client.from('scores').select('score,' + (withPts ? 'points,' : '') + 'user_id,' + prof).gte('day', sinceKey)).limit(5000);
+    if (error && error.code === '42703' && withPts) { LB.ptsCol = false; return lbFetch(mode); }
     const tot = {};
     for (const r of (data || [])) {
-      const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: 0, overs: 0 });
-      t.score += r.score; t.overs++;
+      const t = tot[r.user_id] || (tot[r.user_id] = { id: r.user_id, name: (r.profiles && r.profiles.name) || 'Umpire', nation: r.profiles && r.profiles.nation, rating: r.profiles && r.profiles.rating, streak: r.profiles && r.profiles.streak, score: 0, points: 0, overs: 0 });
+      t.score += r.score; t.points += r.points || 0; t.overs++;
     }
-    return Object.values(tot).sort((a, b) => b.score - a.score || a.overs - b.overs);
+    return Object.values(tot).sort((a, b) => b.points - a.points || b.score - a.score || a.overs - b.overs);
   };
 
   lbPaintBoard = async function () {
@@ -7237,8 +7381,8 @@ function polishGround() {
     if (lbMode === 'nations') {
       if (rows === null) { list.innerHTML = '<div class="bNote">Nation v nation switches on shortly.</div>'; return; }
       if (!rows.length) { list.innerHTML = '<div class="bNote">No nation has three umpires on the board yet. Recruit.</div>'; return; }
-      list.innerHTML = rows.slice(0, 25).map((r, i) => '<div class="bRow' + (LB.nation === r.nation ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bNat">' + esc(r.nation) + '</span><span class="bSub">' + r.umpires + ' umpires · ' + r.overs + ' overs</span><b>' + r.avg.toFixed(2) + '</b></div>').join('');
-      me.textContent = 'Average correct per over, last 30 days. Three umpires minimum.';
+      list.innerHTML = rows.slice(0, 25).map((r, i) => '<div class="bRow' + (LB.nation === r.nation ? ' me' : '') + '"><i>' + (i + 1) + '</i><span class="bNat">' + esc(r.nation) + '</span><span class="bSub">' + r.umpires + ' umpires · ' + r.overs + ' overs</span><b>' + (r.avg > 6 ? fmtPts(r.avg) : r.avg.toFixed(2)) + '</b></div>').join('');
+      me.textContent = (rows[0].avg > 6 ? 'Average points per over' : 'Average correct per over') + ', last 30 days. Three umpires minimum.';
       return;
     }
     if (!rows.length) { list.innerHTML = '<div class="bNote">Nobody has posted yet. Be first.</div>'; return; }
@@ -7246,8 +7390,8 @@ function polishGround() {
     list.innerHTML = rows.slice(0, 25).map((r, i) => {
       const mine = LB.user && r.id === LB.user.id;
       const right = lbMode === 'today'
-        ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + r.score + '/6</b>'
-        : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + r.score + '</b>';
+        ? '<span class="bGrid">' + (r.grid || '') + '</span><b>' + (r.points != null ? fmtPts(r.points) : r.score + '/6') + '</b>'
+        : '<span class="bGrid">' + r.overs + (r.overs === 1 ? ' over' : ' overs') + '</span><b>' + (r.points ? fmtPts(r.points) : r.score) + '</b>';
       const rk = r.rating ? '<span class="rk" title="' + r.rating + '">' + band(r.rating) + '</span>' : '';
       const fl = r.streak > 1 ? '<span class="fl">🔥' + r.streak + '</span>' : '';
       const flag = (LB.user && !mine && LB.modCol) ? '<a class="flag" data-id="' + r.id + '" title="Report this name">⚑</a>' : '';
@@ -7416,7 +7560,7 @@ function polishGround() {
   const _lbOnOverEnd = lbOnOverEnd;
   lbOnOverEnd = async function (right, grid, bowler) {
     await _lbOnOverEnd(right, grid, bowler);
-    const b = E('pIn'); if (b) b.textContent = 'Post ' + right + '/6 to the board';
+    const b = E('pIn'); if (b) b.textContent = 'Post ' + (pointsOn() && isDaily() && !practice ? fmtPts(overPoints()) : right + '/6') + ' to the board';
   };
 
   /* ---------- reporting a name ---------- */
@@ -7482,7 +7626,7 @@ function polishGround() {
     let u = SITE + '?r=' + G.code + '&s=' + channel;
     if (daily() && typeof phase !== 'undefined' && phase === 'over') {
       const right = results.filter(x => x === 'right').length;
-      let c = lbDay().replace(/-/g, '') + '-' + right + '-' + gridCode();
+      let c = lbDay().replace(/-/g, '') + '-' + right + '-' + gridCode() + (pointsOn() ? '-p' + overPoints() : '');
       const n = myName(); if (n) c += '-' + encodeURIComponent(n);
       u += '&c=' + c;
     }
@@ -7491,7 +7635,9 @@ function polishGround() {
   // the share text the game already builds, with its last line swapped for a tagged link
   function taggedText(channel) {
     const body = String(shareText || '').replace(/\n?(https?:\/\/)?overandoutgame\.com\S*\s*$/i, '');
-    const ask = daily() ? 'Same six balls for everyone today. Beat me:' : 'Think you can umpire?';
+    const ask = !daily() ? 'Think you can umpire?'
+      : pointsOn() ? 'Six LBW shouts, three seconds each. Same balls for everyone today. Beat ' + fmtPts(overPoints()) + ' 👇'
+      : 'Same six balls for everyone today. Beat me:';
     return body + '\n' + ask + '\n' + link(channel);
   }
 
@@ -7525,7 +7671,7 @@ function polishGround() {
     if (card) {
       const el = document.createElement('div'); el.id = 'ocCh';
       el.textContent = ch.day === todayKey()
-        ? who + ' got ' + ch.score + '/6 on today’s over. Same six balls. Beat that.'
+        ? who + (ch.points != null ? ' scored ' + fmtPts(ch.points) : ' got ' + ch.score + '/6') + ' on today’s over. Same six balls. Beat that.'
         : who + ' challenged you. That over has gone — today’s is live. Play it and send yours back.';
       card.insertBefore(el, card.firstChild);
       const show = () => { el.style.display = daily() ? 'block' : 'none'; };
@@ -7540,19 +7686,22 @@ function polishGround() {
     }
     chBox.style.display = 'none'; E('grid').style.display = '';
     if (!ch || ch.day !== lbDay() || !daily()) { wa.textContent = 'Challenge on WhatsApp'; return; }
-    const mine = results.filter(x => x === 'right').length;
+    const usePts = pointsOn() && ch.points != null;
+    const mine = usePts ? overPoints() : results.filter(x => x === 'right').length;
+    const theirs = usePts ? ch.points : ch.score;
+    const lab = v => usePts ? fmtPts(v) : v + '/6';
     chBox.textContent = '';
     const row = (label, code, score) => {
       const r = document.createElement('div'); r.className = 'chRow';
       const l = document.createElement('i'); l.style.fontStyle = 'normal'; l.textContent = label;
       const s = document.createElement('span'); s.textContent = squares(code);
-      const b = document.createElement('b'); b.textContent = score + '/6';
+      const b = document.createElement('b'); b.textContent = lab(score);
       r.appendChild(l); r.appendChild(s); r.appendChild(b); return r;
     };
     chBox.appendChild(row('You', gridCode(), mine));
-    chBox.appendChild(row(who, ch.grid, ch.score));
+    chBox.appendChild(row(who, ch.grid, theirs));
     const say = document.createElement('div'); say.className = 'chSay';
-    say.textContent = mine > ch.score ? 'You beat ' + who + '. Let them know.' : mine < ch.score ? who + ' takes it today. Same again tomorrow?' : 'Level. Decider tomorrow.';
+    say.textContent = mine > theirs ? 'You beat ' + who + '. Let them know.' : mine < theirs ? who + ' takes it today. Same again tomorrow?' : 'Level. Decider tomorrow.';
     chBox.appendChild(say);
     chBox.style.display = 'block'; E('grid').style.display = 'none';   // the You row is the same grid
     wa.textContent = 'Reply on WhatsApp';
@@ -7612,3 +7761,346 @@ function polishGround() {
   };
 }
 </script>
+<script>
+/* ============================================================
+   PRIVATE LEAGUES — play your mates, not the world.
+   Anyone signed in (a guest counts) starts a league: a name and how many days
+   it runs. It starts the next day. The link goes on WhatsApp; whoever opens it
+   and joins is in. Every day everyone umpires the same over, and the table is
+   the sum of their points on the league's days — straight from the scores the
+   game already posts, so there is nothing extra to submit.
+
+   Needs supabase-v17.sql (leagues, league_members and five functions). Until
+   that has been run the tab says "switches on shortly" and nothing else
+   changes. Never allowed to break the game.
+   ============================================================ */
+{
+  const G = window.OO_GROWTH || {};
+  const SITE = 'https://overandoutgame.com/';
+  const LG = { view: null, days: 7, justMade: false };
+  const rawGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const rawSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+  const pendingCode = () => { const c = rawGet('oo3d:league'); return c && /^[A-Z0-9]{4,8}$/.test(c) ? c : null; };
+  const track = (event) => { try { lbTrack(event); } catch (e) { /* never in the way */ } };
+
+  const css = document.createElement('style');
+  css.textContent = `
+  #board .tab{padding:8px 3px;letter-spacing:1.1px}
+  .lgPitch{font-size:13px;line-height:1.5;color:#cfe4ea;padding:4px 4px 8px}
+  .lgPitch b{color:#fff}
+  .lgList{margin-bottom:12px}
+  .lgRow{display:flex;align-items:center;gap:10px;padding:10px 8px;border:1px solid var(--line);border-radius:10px;margin-bottom:7px;cursor:pointer;background:#0a1119}
+  .lgRow .lgN{flex:1;min-width:0}
+  .lgRow .lgN b{display:block;font:700 15px var(--label);letter-spacing:.6px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lgRow .lgN span{font:700 10.5px var(--label);letter-spacing:1.2px;text-transform:uppercase;color:var(--dim)}
+  .lgRow em{font:700 12px var(--label);letter-spacing:1px;color:var(--teal);font-style:normal;white-space:nowrap}
+  .lgNew{border:1px solid #2b5a8a;border-radius:10px;padding:11px 12px;background:#0a1119}
+  .lgH{font:700 10.5px var(--label);letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .lgNew input{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:8px;border:1px solid #2b5a8a;background:#0d1620;color:var(--ink);font:500 16px var(--label)}
+  .lgNew input:focus{outline:none;border-color:var(--teal)}
+  .lgDays{display:flex;gap:6px;margin:10px 0}
+  .lgD{flex:1;padding:9px 0;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--dim);font:700 12px var(--label);letter-spacing:1px}
+  .lgD.on{background:#16324f;color:#fff;border-color:var(--teal)}
+  .lgNote{font-size:12px;color:var(--dim);line-height:1.45;margin-top:8px}
+  .lgNote.err{color:#ff6a5d}
+  .lgHead{font:700 11px var(--label);letter-spacing:1.4px;text-transform:uppercase;color:var(--amber);margin:-2px 0 8px}
+  .lgMade{font-size:13px;line-height:1.45;color:#d9e2e9;background:rgba(54,227,200,.08);border:1px solid rgba(54,227,200,.3);border-radius:10px;padding:9px 10px;margin-bottom:10px}
+  .lgT{font:700 9.5px var(--label);letter-spacing:1px;color:var(--green);margin-left:7px}
+  .lgBtns{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+  .lgBtns .wide,.lgBtns .ghost{margin:0}
+  .lgWa{background:#25d366!important;color:#04210f!important}
+  .lgBack{display:inline-block;margin-top:10px;font-size:12px;color:var(--teal);cursor:pointer;text-decoration:underline}
+  .lgLeave{display:inline-block;margin:10px 0 0 14px;font-size:11.5px;color:var(--dim);cursor:pointer;text-decoration:underline}
+  #lgBox{margin-top:8px}
+  #lgBox .lgLine{display:block;width:100%;text-align:left;padding:10px 12px;margin-bottom:6px;border:1px solid rgba(255,210,63,.35);border-radius:10px;background:rgba(255,210,63,.07);color:#d9e2e9;font:500 12.5px/1.4 Inter,system-ui,sans-serif;cursor:pointer}
+  #lgBox .lgLine b{color:var(--amber)}
+  #lgBox .lgInv{padding:10px 12px;border:1px solid rgba(255,210,63,.45);border-radius:10px;background:rgba(255,210,63,.08);font-size:12.5px;line-height:1.45;color:#d9e2e9;margin-bottom:8px}
+  #lgBox .lgInv b{color:var(--amber)} #lgBox .lgInv .wide{margin-top:8px}
+  #ocLg{display:none;margin:0 0 12px;padding:9px 10px;border-radius:10px;background:rgba(54,227,200,.08);border:1px solid rgba(54,227,200,.35);color:#cfe4ea;font-size:12.5px;line-height:1.45}
+  #ocLg b{color:var(--teal)}`;
+  document.head.appendChild(css);
+
+  /* ---------- dates, as the day keys the game already uses ---------- */
+  const p2 = n => (n < 10 ? '0' : '') + n;
+  const keyOf = d => d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+  const dateOf = k => new Date(k + 'T12:00:00');
+  const addDays = (k, n) => { const d = dateOf(k); d.setDate(d.getDate() + n); return keyOf(d); };
+  const between = (a, b) => Math.round((dateOf(b) - dateOf(a)) / 864e5);
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const short = k => { const d = dateOf(k); return isNaN(d) ? k : DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()]; };
+  const endOf = l => addDays(l.start_day, l.days - 1);
+  function status(l, winner) {
+    const t = todayKey();
+    if (t < l.start_day) return l.start_day === addDays(t, 1) ? 'Starts tomorrow' : 'Starts ' + short(l.start_day);
+    if (t > endOf(l)) return 'Finished ' + short(endOf(l)) + (winner ? ' · ' + winner + ' won' : '');
+    return 'Day ' + (between(l.start_day, t) + 1) + ' of ' + l.days + (t === endOf(l) ? ' · last day' : ' · ends ' + short(endOf(l)));
+  }
+  const live = l => { const t = todayKey(); return t >= l.start_day && t <= endOf(l); };
+
+  /* ---------- the link and what goes with it ---------- */
+  const inviteLink = code => SITE + '?l=' + code + (G.code ? '&r=' + G.code : '') + '&s=lg';
+  const inviteText = l => 'Join my Over & Out league: ' + l.name + ' 🏏\n' +
+    l.days + ' days from ' + short(l.start_day) + '. Everyone gets the same daily LBW over — six shouts, three seconds each. Most points wins.\n' +
+    inviteLink(l.code);
+
+  const on = () => lbEnabled() && LB.client;
+  const rpc = (fn, args) => LB.client.rpc(fn, args || {});
+  const missing = e => !!e && /PGRST202|42883|42P01|not find|does not exist/i.test((e.message || '') + ' ' + (e.code || ''));
+  const note = t => '<div class="bNote">' + t + '</div>';
+
+  /* ---------- the tab ---------- */
+  const tabs = E('bTabToday').parentNode;
+  const lgTab = document.createElement('button');
+  lgTab.className = 'tab'; lgTab.id = 'bTabLeagues'; lgTab.textContent = 'Leagues';
+  tabs.appendChild(lgTab);
+  lgTab.onclick = () => { LG.view = null; lbOpen('leagues'); };
+
+  const _paint = lbPaintBoard;
+  lbPaintBoard = async function () {
+    lgTab.className = 'tab' + (lbMode === 'leagues' ? ' on' : '');
+    if (lbMode !== 'leagues') return _paint();
+    for (const id of ['bTabToday', 'bTabMonth', 'bTabNations']) { const t = E(id); if (t) t.classList.remove('on'); }
+    return paintLeagues();
+  };
+
+  async function paintLeagues() {
+    const list = E('bList'), me = E('bMe');
+    me.textContent = '';
+    E('bTitle').textContent = 'PRIVATE LEAGUES';
+    if (!lbEnabled()) { list.innerHTML = note('Leagues live on the real site — this preview copy keeps to itself.'); return; }
+    if (!LB.client) { list.innerHTML = note('Loading…'); return; }
+    if (LG.view) return paintOne(LG.view);
+    const pend = pendingCode();
+    if (!LB.user) {
+      list.innerHTML = '<div class="lgPitch"><b>Play your mates, not the world.</b> Start a private league, send the link, and everyone umpires the same over each day. You pick how many days it runs; most points wins.</div>' +
+        (pend ? '<div class="lgMade">You have an invite waiting. Pick a name below and you are in.</div>' : '') +
+        note('Pick a name below (or sign in) to start or join one.');
+      return;
+    }
+    list.innerHTML = note('Loading…');
+    const { data, error } = await rpc('my_leagues');
+    if (lbMode !== 'leagues' || LG.view) return;               // they moved on while it loaded
+    if (error) { list.innerHTML = note(missing(error) ? 'Leagues switch on shortly.' : 'Could not load your leagues — try again.'); return; }
+    const mine = data || [];
+    let h = '';
+    if (pend && !mine.some(l => l.code === pend)) {
+      h += '<div class="lgMade">You were invited to league <b>' + esc(pend) + '</b>. <a class="lgBack" id="lgSeePend">Have a look</a></div>';
+    }
+    if (mine.length) {
+      h += '<div class="lgList">' + mine.map(l =>
+        '<div class="lgRow" data-code="' + esc(l.code) + '"><div class="lgN"><b>' + esc(l.name) + '</b><span>' + esc(status(l)) + ' · ' + l.members + (+l.members === 1 ? ' umpire' : ' umpires') + '</span></div><em>Table ›</em></div>'
+      ).join('') + '</div>';
+    }
+    h += '<div class="lgNew"><div class="lgH">' + (mine.length ? 'Start another league' : 'Start a league') + '</div>' +
+      '<input id="lgName" maxlength="30" autocomplete="off" placeholder="League name — e.g. The Office XI">' +
+      '<div class="lgDays">' + [3, 5, 7, 14, 30].map(n => '<button class="lgD' + (n === LG.days ? ' on' : '') + '" data-d="' + n + '">' + n + ' days</button>').join('') + '</div>' +
+      '<button class="wide" id="lgCreate">Create league</button>' +
+      '<div class="lgNote" id="lgNote">It starts tomorrow and runs ' + LG.days + ' days. Same over for everyone each day; most points wins.</div></div>';
+    list.innerHTML = h;
+    list.querySelectorAll('.lgRow').forEach(r => { r.onclick = () => { LG.view = r.dataset.code; LG.justMade = false; lbPaintBoard(); }; });
+    list.querySelectorAll('.lgD').forEach(b => {
+      b.onclick = () => {
+        LG.days = +b.dataset.d;
+        list.querySelectorAll('.lgD').forEach(x => x.classList.toggle('on', x === b));
+        const n = E('lgNote'); if (n && !n.classList.contains('err')) n.textContent = 'It starts tomorrow and runs ' + LG.days + ' days. Same over for everyone each day; most points wins.';
+      };
+    });
+    if (E('lgSeePend')) E('lgSeePend').onclick = () => { LG.view = pend; lbPaintBoard(); };
+    E('lgCreate').onclick = create;
+    E('lgName').onkeydown = e => { if (e.key === 'Enter') create(); };
+  }
+
+  async function create() {
+    const n = E('lgNote'), btn = E('lgCreate');
+    const say = (t, err) => { if (n) { n.textContent = t; n.className = 'lgNote' + (err ? ' err' : ''); } };
+    const name = (E('lgName').value || '').trim().slice(0, 30);
+    if (!name) { say('Give it a name first.', true); E('lgName').focus(); return; }
+    if (!LB.user) { say('Pick a name below first.', true); return; }
+    btn.disabled = true; say('Making it…');
+    const { data, error } = await rpc('create_league', { p_name: name, p_days: LG.days, p_start: addDays(todayKey(), 1) });
+    btn.disabled = false;
+    if (error || !data) {
+      say(missing(error) ? 'Leagues switch on shortly.'
+        : /not allowed|23514/i.test((error && (error.message + error.code)) || '') ? "That name isn't allowed. Try another."
+        : /too many/i.test((error && error.message) || '') ? 'That is enough new leagues for today.'
+        : 'Could not make it — try again.', true);
+      return;
+    }
+    track('league_create');
+    LG.view = data.code; LG.justMade = true;
+    lbPaintBoard();
+  }
+
+  async function paintOne(code) {
+    const list = E('bList'), me = E('bMe');
+    list.innerHTML = note('Loading…');
+    const t = todayKey();
+    const [info, table] = await Promise.all([rpc('league_info', { p_code: code }), rpc('league_table', { p_code: code, p_today: t })]);
+    if (lbMode !== 'leagues' || LG.view !== code) return;
+    const back = '<a class="lgBack" id="lgBack">‹ My leagues</a>';
+    if (info.error || !info.data) {
+      list.innerHTML = note(missing(info.error) ? 'Leagues switch on shortly.' : 'There is no league with the code ' + esc(code) + '.') + back;
+      if (!missing(info.error) && pendingCode() === code) rawSet('oo3d:league', null);
+      wireBack(); return;
+    }
+    const l = info.data, rows = (table && table.data) || [];
+    const member = !!(LB.user && rows.some(r => r.user_id === LB.user.id));
+    const started = t >= l.start_day, ended = t > endOf(l);
+    const winner = ended && rows.length && +rows[0].points > 0 ? rows[0].name : null;
+    const dayNo = started ? Math.min(l.days, between(l.start_day, t) + 1) : 0;
+    E('bTitle').textContent = String(l.name).toUpperCase();
+    let h = '<div class="lgHead">' + esc(status(l, winner)) + ' · ' + rows.length + (rows.length === 1 ? ' umpire' : ' umpires') + '</div>';
+    if (LG.justMade) h += '<div class="lgMade"><b>League made.</b> Now send it to your mates — it starts ' + (l.start_day === addDays(t, 1) ? 'tomorrow' : short(l.start_day)) + ', and anyone with the link can join.</div>';
+    else if (!member && !ended) h += '<div class="lgMade">' + (l.owner_name ? esc(l.owner_name) + ' started this league. ' : '') + l.days + ' days from ' + esc(short(l.start_day)) + '. Join and your daily over counts.</div>';
+    h += rows.map((r, i) => {
+      const mine = LB.user && r.user_id === LB.user.id;
+      const today = started && !ended && r.today_points !== null && r.today_points !== undefined;
+      return '<div class="bRow' + (mine ? ' me' : '') + '"><i>' + (started ? i + 1 : '·') + '</i>' +
+        '<span class="bName">' + natPill(r.nation) + esc(r.name || 'Umpire') + (today ? '<span class="lgT">✓ TODAY</span>' : '') + '</span>' +
+        '<span class="bGrid">' + (started ? r.overs + '/' + dayNo : '') + '</span>' +
+        '<b>' + (started ? fmtPts(+r.points) : '—') + '</b></div>';
+    }).join('');
+    h += '<div class="lgBtns">';
+    if (member && !ended) h += '<button class="wide lgWa" id="lgWa">Invite on WhatsApp</button><button class="ghost" id="lgCopy">Copy invite link</button>';
+    if (!member && !ended && LB.user) h += '<button class="wide gold" id="lgJoin">Join this league</button>';
+    // signed out: picking a name below is the join (it happens by itself after)
+    if (!LB.user && !ended) rawSet('oo3d:leagueJoin', l.code);
+    h += '</div>' + back + (member ? '<a class="lgLeave" id="lgLeave">Leave league</a>' : '');
+    list.innerHTML = h;
+    if (member && started) {
+      const i = rows.findIndex(r => r.user_id === LB.user.id);
+      me.textContent = 'You are ' + ordinal(i + 1) + ' of ' + rows.length + '. Column: overs played / days so far.';
+    } else if (!LB.user && !ended) me.textContent = 'Pick a name below and you are in.';
+    wireBack();
+    if (E('lgWa')) E('lgWa').onclick = () => {
+      try { lbTrack('share', { __g: { channel: 'lg' } }); } catch (e) { /* ignore */ }
+      const url = 'https://wa.me/?text=' + encodeURIComponent(inviteText(l));
+      const w = window.open(url, '_blank'); if (!w) location.href = url;
+    };
+    if (E('lgCopy')) E('lgCopy').onclick = () => {
+      const b = E('lgCopy');
+      const done = ok => { b.textContent = ok ? '✓ Copied' : inviteLink(l.code); };
+      try { navigator.clipboard.writeText(inviteText(l)).then(() => done(true), () => done(false)); } catch (e) { done(false); }
+    };
+    if (E('lgJoin')) E('lgJoin').onclick = () => join(l.code);
+    if (E('lgLeave')) E('lgLeave').onclick = async () => {
+      if (!confirm('Leave ' + l.name + '? Your scores stay yours; you just drop off this table.')) return;
+      await rpc('leave_league', { p_code: l.code });
+      LG.view = null; lbPaintBoard();
+    };
+  }
+  function wireBack() { const b = E('lgBack'); if (b) b.onclick = () => { LG.view = null; LG.justMade = false; lbPaintBoard(); }; }
+
+  /* ---------- joining ---------- */
+  async function join(code) {
+    if (!on()) return;
+    if (!LB.user) {
+      // after they pick a name (or come back from Google) the join happens by itself
+      rawSet('oo3d:leagueJoin', code);
+      if (window.__hideOverCard) window.__hideOverCard();
+      LG.view = code; lbOpen('leagues');
+      return;
+    }
+    const { error } = await rpc('join_league', { p_code: code });
+    if (error) {
+      const m = (error.message || '') + ' ' + (error.code || '');
+      alertInList(/over/i.test(m) ? 'That league has finished.' : /full/i.test(m) ? 'That league is full (50 umpires).' : /no such|P0002/i.test(m) ? 'There is no league with that code.' : missing(error) ? 'Leagues switch on shortly.' : 'Could not join — try again.');
+      return;
+    }
+    track('league_join');
+    rawSet('oo3d:league', null); rawSet('oo3d:leagueJoin', null); G.league = null;
+    if (window.__hideOverCard) window.__hideOverCard();
+    LG.view = code; LG.justMade = false; lbOpen('leagues');
+    paintBox();
+  }
+  function alertInList(t) { const list = E('bList'); if (list) list.insertAdjacentHTML('afterbegin', '<div class="lgMade" style="border-color:#ff6a5d">' + esc(t) + '</div>'); }
+
+  const _setUser = lbSetUser;
+  lbSetUser = async function (user) {
+    // signing in from the Leagues tab should land back on it, not on Today
+    const wasHere = !LB.user && E('board').style.display === 'block' && lbMode === 'leagues';
+    await _setUser(user);
+    if (user) {
+      const want = rawGet('oo3d:leagueJoin');
+      if (want && /^[A-Z0-9]{4,8}$/.test(want)) { rawSet('oo3d:leagueJoin', null); join(want); }
+      else if (wasHere) lbOpen('leagues');
+    }
+  };
+
+  /* ---------- the end of the over: your leagues, an invite, or the way in ---------- */
+  let box = null;
+  async function paintBox() {
+    if (!box) {
+      box = document.createElement('div'); box.id = 'lgBox';
+      const post = E('post'); post.parentNode.insertBefore(box, post);
+    }
+    box.innerHTML = '';
+    if (!on() || !isDaily() || practice) return;
+    const pend = pendingCode();
+    let mine = [];
+    if (LB.user) {
+      const { data, error } = await rpc('my_leagues');
+      if (missing(error)) return;
+      mine = data || [];
+    }
+    let h = '', invited = false;
+    if (pend && !mine.some(l => l.code === pend)) {
+      const { data } = await rpc('league_info', { p_code: pend });
+      if (data) invited = true;
+      if (data) h += '<div class="lgInv">You were invited to <b>' + esc(data.name) + '</b> — ' + data.days + ' days from ' + esc(short(data.start_day)) + ', ' + data.members + (+data.members === 1 ? ' umpire' : ' umpires') + ' in.<button class="wide gold" id="lgBoxJoin">Join the league</button></div>';
+    }
+    const act = mine.filter(live).slice(0, 2);
+    for (const l of act) {
+      const { data } = await rpc('league_table', { p_code: l.code, p_today: todayKey() });
+      const rows = data || [], i = LB.user ? rows.findIndex(r => r.user_id === LB.user.id) : -1;
+      if (i < 0) continue;
+      h += '<button class="lgLine" data-code="' + esc(l.code) + '"><b>' + esc(l.name) + '</b> · you are ' + ordinal(i + 1) + ' of ' + rows.length + ' · day ' + (between(l.start_day, todayKey()) + 1) + ' of ' + l.days + ' ›</button>';
+    }
+    if (!act.length && !invited) h += '<button class="ghost" id="lgBoxNew">🏆 Start a league with your mates</button>';
+    box.innerHTML = h;
+    box.querySelectorAll('.lgLine').forEach(b => { b.onclick = () => { LG.view = b.dataset.code; LG.justMade = false; lbOpen('leagues'); }; });
+    if (E('lgBoxJoin')) E('lgBoxJoin').onclick = () => join(pend);
+    if (E('lgBoxNew')) E('lgBoxNew').onclick = () => { track('league_open'); LG.view = null; lbOpen('leagues'); };
+  }
+  const _endOver = endOver;
+  endOver = function () {
+    _endOver();
+    // a beat's grace, so today's over has been posted before positions are read
+    try { if (box) box.innerHTML = ''; setTimeout(() => { paintBox().catch(() => {}); }, 1500); } catch (e) { /* never in the way */ }
+  };
+
+  /* ---------- an invite link: say so on the over card ---------- */
+  {
+    const code = pendingCode();
+    const card = document.querySelector('#overCard .oc');
+    if (code && G.leagueFresh && card) {
+      const el = document.createElement('div'); el.id = 'ocLg';
+      el.innerHTML = 'You have been invited to a private league. Play today’s over, then join it from the end screen.';
+      card.insertBefore(el, card.firstChild);
+      el.style.display = 'block';
+      let tries = 0;
+      const iv = setInterval(async () => {
+        if (++tries > 40) { clearInterval(iv); return; }
+        if (!on()) return;
+        clearInterval(iv);
+        try {
+          const { data } = await rpc('league_info', { p_code: code });
+          if (data) el.innerHTML = 'You have been invited to <b>' + esc(data.name) + '</b> — ' + data.days + ' days from ' + esc(short(data.start_day)) + '. Play today’s over, then join it from the end screen.';
+          else el.style.display = 'none';
+        } catch (e) { /* leave the plain line */ }
+      }, 250);
+    }
+  }
+
+  window.__leagues = { LG, join, inviteText, inviteLink, status, paintBox };
+
+  /* The sign-in panel is painted by the last of three layers (board, streaks,
+     ways in). If the session check finished before those layers had loaded —
+     it can, when there is no network round trip — the first, Google-only
+     panel stayed up, and its button only reopened the board. This is the last
+     script on the page, so paint it once more now that every layer exists. */
+  try { if (lbEnabled()) lbPaintAuth(); } catch (e) { /* never in the way */ }
+}
+
+</script>
+
